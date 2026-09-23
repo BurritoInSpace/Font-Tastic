@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import socket
+import sys
 import threading
 import time
 import webbrowser
@@ -60,7 +61,25 @@ def wait_for(port: int, timeout: float = 10.0):
     raise RuntimeError(f"Server did not start on port {port}")
 
 
+def frozen() -> bool:
+    """True when running as the packaged Font-tastic.exe."""
+    return getattr(sys, "frozen", False)
+
+
+def _log_to_file_without_console():
+    """The windowed .exe has no console (sys.stderr is None), which would crash
+    anything that logs. Send output to a log file next to the recent list."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    log_dir = recent.config_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log = open(log_dir / "fonttastic.log", "a", encoding="utf-8", buffering=1)
+    sys.stdout = sys.stdout or log
+    sys.stderr = sys.stderr or log
+
+
 def main(argv=None):
+    _log_to_file_without_console()
     parser = argparse.ArgumentParser(prog="fonttastic", description=__doc__.splitlines()[0])
     parser.add_argument("project", nargs="?", help="a .fonttastic file, or the folder holding one")
     parser.add_argument("--home", action="store_true", help="start on the home screen, don't reopen the last project")
@@ -78,11 +97,13 @@ def main(argv=None):
         try:
             project = Project.convert(target) if args.convert else Project(target)
         except NeedsConversion as exc:
-            parser.exit(1, f"{exc}\nRun again with --convert to add a project file.\n")
+            if not frozen():
+                parser.exit(1, f"{exc}\nRun again with --convert to add a project file.\n")
+            print(exc, file=sys.stderr)  # the home screen offers the conversion
         except ProjectError as exc:
-            if args.project:
+            if args.project and not frozen():
                 parser.exit(1, f"{exc}\n")
-            project = None  # the last project is gone; start on the home screen
+            print(exc, file=sys.stderr)  # start on the home screen instead
         if project is not None:
             recent.touch(project.file, project.name)
             project.import_all()

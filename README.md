@@ -32,6 +32,20 @@ cd frontend; npm install; npm run build; cd ..
 .\.venv\Scripts\python -m fonttastic examples\demo --browser # in a browser tab instead of a window
 ```
 
+### Desktop app (Font-tastic.exe)
+
+```powershell
+.\.venv\Scripts\python -m pip install -e ".[build]"
+.\.venv\Scripts\python packaging\build_exe.py              # add --shortcut for a desktop shortcut
+```
+
+This builds `dist\Font-tastic\Font-tastic.exe`, a self-contained folder
+(about 40 MB) with Python, all libraries and the UI bundled, so it runs
+without the venv. Double-click it to reopen your last project, or pass a
+`.fonttastic` file. The whole `Font-tastic` folder can be copied anywhere.
+It doesn't update itself: rebuild after pulling new code. It has no console,
+so errors go to `%APPDATA%\Font-tastic\fonttastic.log`.
+
 UI development with hot reload:
 
 ```powershell
