@@ -7,6 +7,14 @@ compilation, and a live RTL preview shaped by HarfBuzz.
 It isn't a Bezier editor and it isn't an Illustrator plugin. See
 [hebrew-font-editor-brief.md](hebrew-font-editor-brief.md) for the full design.
 
+> **Disclaimer: this project is vibe-coded.** Most of the code is written by
+> an AI coding assistant (Claude, via Claude Code), with the project's author
+> directing the design, deciding what gets built, and testing the results.
+> Commits co-written by the AI say so in a `Co-Authored-By` line. The code
+> has automated tests, but it hasn't had the line-by-line human review a
+> traditionally written project would get. Please judge it with that in
+> mind, and bug reports are welcome.
+
 ## Setup (Windows)
 
 ```powershell
@@ -137,3 +145,10 @@ Next:
 - Variable fonts (Phase 2)
 - Bilingual/multilingual fonts, Hebrew + Latin first (Phase 3, the end
   goal; see the brief)
+
+## License
+
+Font-tastic is free software, licensed under the
+[GNU General Public License v3.0 or later](LICENSE). You may use, study,
+share and modify it; if you distribute modified versions, they must be
+released under the same license.
