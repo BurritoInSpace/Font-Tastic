@@ -322,3 +322,14 @@ input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px s
 .member .icon { font-size: 14px; padding: 0 4px; }
 .add-letters { width: 90px; }
 .new-group input:first-child { width: 150px; }
+
+/* glyph actions ------------------------------------------------------------ */
+
+button.danger { color: var(--error); }
+button.danger:hover:not(:disabled) { border-color: var(--error); }
+.glyph-actions { gap: 6px; }
+.reassign-dialog { width: min(560px, 100%); }
+.reassign-body { padding: 4px 20px 16px; display: flex; flex-direction: column; gap: 10px; }
+.reassign-body p { margin: 0; }
+.mono { font-family: ui-monospace, Consolas, monospace; }
+.hint-inline { font-size: 11px; text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 10px; }

@@ -172,6 +172,12 @@ export const api = {
   editGlyph: (glyph: string) =>
     call<{ path: string; app: string; created: boolean; project: Project }>(
       'POST', `/api/glyphs/${encodeURIComponent(glyph)}/edit`),
+  deleteGlyph: (glyph: string) =>
+    call<{ removed: { kerning: number; groups: number; ligatures: number }; project: Project }>(
+      'POST', `/api/glyphs/${encodeURIComponent(glyph)}/delete`),
+  renameGlyph: (glyph: string, newName: string, swap = false, moveAlternates = true) =>
+    call<{ renamed: Record<string, string>; project: Project }>(
+      'POST', `/api/glyphs/${encodeURIComponent(glyph)}/rename`, { newName, swap, moveAlternates }),
   duplicateGlyph: (glyph: string, unicode: number) =>
     call<{ name: string; project: Project }>('POST', `/api/glyphs/${encodeURIComponent(glyph)}/duplicate`, { unicode }),
   revealGlyph: (glyph: string) => call<{ path: string }>('POST', `/api/glyphs/${encodeURIComponent(glyph)}/reveal`),

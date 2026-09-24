@@ -113,6 +113,22 @@ Further alternates in the same feature are numbered (`uni05D1.salt.2`) and
 all show up in `salt`'s alternate list. A new alternate starts with its base
 glyph's anchors.
 
+### Fixing and removing glyphs
+
+- **Reassign…** (in the glyph's inspector) is for a glyph that was named or
+  imported as the wrong character. Say what it really is: a character, an
+  alternate of another glyph, or a ligature. The glyph and its SVG move to
+  the new name, and kerning, groups and ligature rules follow. If the target
+  already exists you can **swap** the two (e.g. dalet and resh got each
+  other's files). A base glyph's alternates (`uni05D3.salt`) move along. If
+  the glyph's role changes (letter ↔ niqqud, or a mark that attaches
+  elsewhere), its anchors are reset for the new role; otherwise they're kept.
+- **Delete glyph** removes the glyph, its SVG, and any kerning pairs, group
+  memberships and ligature rules that use it. `.notdef` and the automatic
+  `space` can't be deleted, since they'd just come back.
+- Both take a snapshot first (including the SVG files), so they can be
+  undone from the Project tab.
+
 ### Drawing in Illustrator
 
 - **The artboard is the glyph cell.** The top edge is the ascender, the bottom
@@ -192,6 +208,7 @@ sides, and the HarfBuzz preview below shows the compiled result.
   else, with a link to it.
 - Deleting a group also removes the pairs that use it (a snapshot is taken
   first).
+- **↑ / ↓** step through the pair list, for going over pairs quickly.
 
 ## Status
 

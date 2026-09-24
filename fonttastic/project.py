@@ -478,6 +478,133 @@ class Project:
                 self.font.kerning[(first, second)] = round(value)
             self._commit()
 
+    # -- deleting and reassigning glyphs -------------------------------------
+
+    def _deletable(self, name: str):
+        glyph = self.glyph(name)
+        if name == ".notdef" or glyph.lib.get(AUTO):
+            raise ProjectError(f"{name} is made automatically; it would just come back")
+        return glyph
+
+    def _source_path(self, name: str) -> Path | None:
+        return self.glyphs_dir / self.font[name].lib[SOURCE] if self.has_source(name) else None
+
+    def delete_glyph(self, name: str) -> dict:
+        """Remove a glyph, its SVG, and every pair, group entry and ligature rule
+        that uses it. A snapshot (with the SVG) is taken first."""
+        with self.lock:
+            self._deletable(name)
+            source = self._source_path(name)
+            self.snapshot(f"Before deleting {name}", [source] if source else [])
+            removed = {"kerning": 0, "groups": 0, "ligatures": 0}
+            for pair in [p for p in self.font.kerning if name in p]:
+                del self.font.kerning[pair]
+                removed["kerning"] += 1
+            for key, members in list(self.font.groups.items()):
+                if name in members:
+                    self.font.groups[key] = [m for m in members if m != name]
+                    removed["groups"] += 1
+            rules = self.font.lib.get(features.LIGATURES_KEY, [])
+            kept = [r for r in rules if r["glyph"] != name and name not in r["components"]]
+            removed["ligatures"] = len(rules) - len(kept)
+            if rules:
+                self.font.lib[features.LIGATURES_KEY] = kept
+            del self.font[name]
+            if source:
+                source.unlink()
+            self._ensure_auto_glyphs()  # a deleted hand-drawn space falls back to the automatic one
+            self._commit()
+            return removed
+
+    def rename_glyph(self, old: str, new: str, swap: bool = False, move_alternates: bool = True) -> dict:
+        """Reassign a glyph that was named for the wrong character: it (and its
+        SVG) becomes ``new``, and kerning, groups and ligature rules follow.
+
+        If ``new`` already exists, ``swap`` exchanges the two. With
+        ``move_alternates``, a base glyph's alternates (``old.salt``...) move
+        along. Anchors are kept unless the glyph's role changes (letter vs.
+        mark, or which anchor a mark attaches to); then they're re-seeded."""
+        if new == old:
+            raise ProjectError("That's already its name")
+        if not SAFE_NAME.match(new) or "-" in new:
+            raise ProjectError(f"{new!r} is not a usable glyph name")
+        with self.lock:
+            self._deletable(old)
+            mapping = {old: new}
+            if new in self.font:
+                if not swap:
+                    raise ProjectError(f"{new} already exists")
+                self._deletable(new)
+                mapping[new] = old
+            if move_alternates:
+                moves = {}
+                for a, b in mapping.items():
+                    if "." in a or "." in b:
+                        continue  # only a plain base glyph, staying a base, carries its alternates along
+                    for g in self.font.keys():
+                        if g.startswith(a + ".") and g not in mapping:
+                            moves[g] = b + g[len(a):]
+                mapping.update(moves)
+                # Every target must be free, or be moving away itself (as in a swap).
+                for g, target in moves.items():
+                    if target in self.font and target not in mapping:
+                        raise ProjectError(f"Can't move {g}: {target} already exists")
+            files = [p for p in (self._source_path(n) for n in mapping) if p]
+            self.snapshot(f"Before renaming {old} → {new}{' (swap)' if swap and new in self.font else ''}", files)
+            self._apply_renames(mapping)
+            self._commit()
+            return mapping
+
+    def _role(self, name: str):
+        parsed = naming.parse_filename(name)
+        category = naming.category_for(parsed)
+        mark_class = hebrew.mark_anchor_class(naming.unicode_of_base(parsed.base_name)) if category == "mark" else None
+        return category, mark_class
+
+    def _apply_renames(self, mapping: dict[str, str]):
+        roles = {old: self._role(old) for old in mapping}
+        # Two passes through temporary names, so swaps and chains never collide.
+        temp = {old: f"__renaming_{i}" for i, old in enumerate(mapping)}
+        for old, tmp in temp.items():
+            self._rename_one(old, tmp)
+        for old, new in mapping.items():
+            self._rename_one(temp[old], new)
+
+        def m(name):
+            return mapping.get(name, name)
+
+        kerning = {(m(a), m(b)): v for (a, b), v in self.font.kerning.items()}
+        self.font.kerning.clear()
+        self.font.kerning.update(kerning)
+        for key, members in list(self.font.groups.items()):
+            self.font.groups[key] = [m(g) for g in members]
+        rules = self.font.lib.get(features.LIGATURES_KEY)
+        if rules:
+            self.font.lib[features.LIGATURES_KEY] = [
+                {**r, "glyph": m(r["glyph"]), "components": [m(c) for c in r["components"]]} for r in rules
+            ]
+
+        for old, new in mapping.items():
+            glyph = self.font[new]
+            path = self._source_path(new)
+            parsed = naming.parse_filename(new)
+            if path:
+                self._import_glyph(path, parsed)  # unicode, width and category from the new name
+            else:
+                glyph.unicodes = [parsed.unicode] if parsed.unicode is not None else []
+            if self._role(new) != roles[old]:
+                glyph.clearAnchors()
+                self._seed_anchors(glyph, parsed, self._role(new)[0])
+
+    def _rename_one(self, old: str, new: str):
+        glyph = self.font[old]
+        path = self._source_path(old)
+        self.font.renameGlyph(old, new)
+        if path:
+            target = self.glyphs_dir / f"{new}.svg"
+            path.rename(target)
+            glyph.lib[SOURCE] = target.name
+
     # -- kerning groups -------------------------------------------------------
     #
     # UFO kerning groups are per side: kern1 groups hold glyphs that come

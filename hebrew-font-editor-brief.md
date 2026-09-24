@@ -181,6 +181,10 @@ visual polish that the redesign will replace.
   their data flow, so features built before the redesign carry over.
 - Hebrew/RTL is a first-class concern of the design: RTL text inputs,
   mixed-direction labels, and previews that read right to left.
+- **Replace native browser dialogs.** Confirmations (delete glyph, delete
+  kerning group, restore snapshot) currently use `window.confirm()`. That
+  looks generic and can be mistaken for a system or browser warning, so it
+  should become an in-app dialog in the app's own style.
 
 ## Bilingual / multilingual fonts (Phase 3, not urgent)
 

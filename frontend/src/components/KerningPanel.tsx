@@ -152,6 +152,29 @@ export function KerningPanel({ project, onChanged, onError }: Props) {
   const sortedPairs = [...project.kerning].sort((a, b) => specificity(a) - specificity(b) ||
     a.first.localeCompare(b.first) || a.second.localeCompare(b.second))
 
+  // ↑/↓ step through the pair list (unless typing in a field).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || sortedPairs.length === 0) return
+      e.preventDefault()
+      const at = sortedPairs.findIndex((k) => pairKey(k.first, k.second) === editKey)
+      const next = e.key === 'ArrowDown'
+        ? (at < 0 ? 0 : Math.min(at + 1, sortedPairs.length - 1))
+        : (at < 0 ? sortedPairs.length - 1 : Math.max(at - 1, 0))
+      openPair(sortedPairs[next].first, sortedPairs[next].second)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  // Keep the current pair visible in the list.
+  const listRef = useRef<HTMLTableSectionElement>(null)
+  useEffect(() => {
+    listRef.current?.querySelector('tr.active')?.scrollIntoView({ block: 'nearest' })
+  }, [editKey])
+
   return (
     <div className="panel kerning">
       <h2>Kerning</h2>
@@ -201,12 +224,13 @@ export function KerningPanel({ project, onChanged, onError }: Props) {
         <button disabled={value === 0 && !saved.has(editKey)} onClick={() => change(0)}>Remove</button>
       </div>
 
-      <h4>Pairs <span className="muted">{project.kerning.length}</span></h4>
+      <h4>Pairs <span className="muted">{project.kerning.length}</span>
+        <span className="muted hint-inline">↑ / ↓ step through the list</span></h4>
       {project.kerning.length === 0 ? (
         <p className="muted small">No kerning yet.</p>
       ) : (
         <table className="rules kern-list">
-          <tbody>
+          <tbody ref={listRef}>
             {sortedPairs.map((k) => (
               <tr key={pairKey(k.first, k.second)} className={pairKey(k.first, k.second) === editKey ? 'active' : ''}
                 onClick={() => openPair(k.first, k.second)}>

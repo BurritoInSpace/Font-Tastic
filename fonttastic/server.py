@@ -90,6 +90,12 @@ class KernRequest(BaseModel):
     value: float
 
 
+class RenameRequest(BaseModel):
+    newName: str
+    swap: bool = False
+    moveAlternates: bool = True
+
+
 class DuplicateRequest(BaseModel):
     unicode: int
 
@@ -250,6 +256,19 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
         except OSError as exc:
             raise HTTPException(500, f"Couldn't start Illustrator: {exc}")
         return {"path": str(path), "app": app_name, "created": created, "project": project.summary()}
+
+    @app.post("/api/glyphs/{name}/delete")
+    def delete_glyph(name: str):
+        project = state.require()
+        removed = guard(project.delete_glyph, name)
+        return {"removed": removed, "project": project.summary()}
+
+    @app.post("/api/glyphs/{name}/rename")
+    def rename_glyph(name: str, req: RenameRequest):
+        """Reassign a glyph to another character/name (optionally swapping)."""
+        project = state.require()
+        mapping = guard(project.rename_glyph, name, req.newName, req.swap, req.moveAlternates)
+        return {"renamed": mapping, "project": project.summary()}
 
     @app.post("/api/glyphs/{name}/duplicate")
     def duplicate_glyph(name: str, req: DuplicateRequest):

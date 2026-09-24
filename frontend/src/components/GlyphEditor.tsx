@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type Anchor, type Glyph, type Project } from '../api'
 import { basesFor, glyphLabel, marksFor, STANDARD_ANCHORS } from '../glyphs'
+import { ReassignDialog } from './ReassignDialog'
 
 interface Props {
   project: Project
@@ -8,13 +9,16 @@ interface Props {
   onChanged: () => void
   onError: (msg: string) => void
   onMessage?: (msg: string) => void
-  /** jump to another glyph (e.g. one just created) */
-  onOpenGlyph?: (name: string) => void
+  /** jump to another glyph (e.g. one just created), or to none (after deleting) */
+  onOpenGlyph?: (name: string | null) => void
+  /** replace the project with one the server returned */
+  onProject?: (project: Project) => void
 }
 
 const PAD = 160
 
-export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onOpenGlyph }: Props) {
+export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onOpenGlyph, onProject }: Props) {
+  const [reassigning, setReassigning] = useState(false)
   const [anchors, setAnchors] = useState<Anchor[]>(glyph.anchors)
   const [active, setActive] = useState<number | null>(null)
   const [showGhosts, setShowGhosts] = useState(true)
@@ -179,6 +183,31 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onO
     (n) => !anchors.some((a) => a.name === n),
   )
 
+  const deleteGlyph = async () => {
+    const pairs = project.kerning.filter((k) => k.first === glyph.name || k.second === glyph.name).length
+    const groups = Object.values(project.kernGroups).flatMap((side) => Object.values(side))
+      .filter((members) => members.includes(glyph.name)).length
+    const rules = project.ligatures.filter((r) => r.glyph === glyph.name || r.components.includes(glyph.name)).length
+    const extras = [
+      pairs && `${pairs} kerning pair${pairs === 1 ? '' : 's'}`,
+      groups && `${groups} kerning group membership${groups === 1 ? '' : 's'}`,
+      rules && `${rules} ligature rule${rules === 1 ? '' : 's'}`,
+    ].filter(Boolean)
+    const msg = `Delete ${glyph.char ? glyph.char + ' ' : ''}${glyph.name}` +
+      `${glyph.source && !glyph.sourceMissing ? ` and its file ${glyph.source}` : ''}?` +
+      (extras.length ? `\n\nThis also removes ${extras.join(', ')}.` : '') +
+      '\n\nA snapshot is taken first, so it can be restored from the Project tab.'
+    if (!window.confirm(msg)) return
+    try {
+      const res = await api.deleteGlyph(glyph.name)
+      onProject?.(res.project)
+      onOpenGlyph?.(null)
+      onMessage?.(`Deleted ${glyph.name}`)
+    } catch (e) {
+      onError(String(e))
+    }
+  }
+
   const inFont = new Set(project.glyphs.flatMap((g) => (g.unicode === null ? [] : [g.unicode])))
   const duplicateAs = async (cp: number) => {
     const nameOf = (u: number | null) => project.niqqud.find((n) => n.unicode === u)?.name
@@ -304,6 +333,26 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onO
             ? `Drag the mark onto ${attach.base.char || attach.base.name} to place it · arrow keys nudge the mark (Shift ×10)`
             : 'Drag anchors on the canvas · arrow keys nudge (Shift ×10) · Delete removes'}
         </p>
+
+        {!glyph.auto && glyph.name !== '.notdef' && (
+          <div className="row glyph-actions">
+            <button onClick={() => setReassigning(true)} title="It was named or imported as the wrong character">
+              Reassign…
+            </button>
+            <button className="danger" onClick={() => void deleteGlyph()}>Delete glyph</button>
+          </div>
+        )}
+        {reassigning && (
+          <ReassignDialog project={project} glyph={glyph} onCancel={() => setReassigning(false)}
+            onDone={(next, newName, renamed) => {
+              setReassigning(false)
+              onProject?.(next)
+              onOpenGlyph?.(newName)
+              const moved = Object.entries(renamed).filter(([old]) => old !== glyph.name)
+              onMessage?.(`${glyph.name} is now ${newName}` +
+                (moved.length ? ` (also ${moved.map(([a, b]) => `${a} → ${b}`).join(', ')})` : ''))
+            }} />
+        )}
 
         {isMark && !glyph.auto && (
           <div className="row">
