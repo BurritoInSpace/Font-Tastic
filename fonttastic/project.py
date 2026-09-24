@@ -48,6 +48,8 @@ DEFAULT_PATHS = {"glyphs": "glyphs", "font": "font.ufo", "build": "build", "snap
 KEEP_SNAPSHOTS = 30
 
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.]*$")
+GROUP_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")  # must survive as a feature-file class name
+KERN_SIDES = (1, 2)
 
 
 class ProjectError(Exception):
@@ -435,15 +437,94 @@ class Project:
             self._commit()
 
     def set_kerning(self, first: str, second: str, value: float):
-        """Kern a glyph pair, given in reading order (for Hebrew: the right-hand
-        glyph first). Negative tightens; 0 removes the pair."""
+        """Kern a pair, given in reading order (for Hebrew: the right-hand glyph
+        first). Either side may be a glyph or a kerning group of that side
+        (``public.kern1.*`` first, ``public.kern2.*`` second). Negative
+        tightens; 0 removes the pair."""
         with self.lock:
-            self.glyph(first), self.glyph(second)
+            self._check_kern_member(first, 1)
+            self._check_kern_member(second, 2)
             if round(value) == 0:
                 self.font.kerning.pop((first, second), None)
             else:
                 self.font.kerning[(first, second)] = round(value)
             self._commit()
+
+    # -- kerning groups -------------------------------------------------------
+    #
+    # UFO kerning groups are per side: kern1 groups hold glyphs that come
+    # first in a pair (in Hebrew, the right-hand letter, grouped by its left
+    # edge) and kern2 groups glyphs that come second. A glyph belongs to at
+    # most one group per side. Pairs resolve most-specific first:
+    # glyph+glyph, glyph+group, group+glyph, group+group.
+
+    @staticmethod
+    def group_key(side: int, name: str) -> str:
+        return f"public.kern{side}.{name}"
+
+    def _check_kern_member(self, key: str, side: int):
+        if key.startswith("public.kern"):
+            if not key.startswith(f"public.kern{side}.") or key not in self.font.groups:
+                raise ProjectError(f"{key} is not a kerning group for side {side}")
+        else:
+            self.glyph(key)
+
+    def kern_groups(self) -> dict:
+        out = {"1": {}, "2": {}}
+        for key, members in self.font.groups.items():
+            for side in KERN_SIDES:
+                prefix = f"public.kern{side}."
+                if key.startswith(prefix):
+                    out[str(side)][key[len(prefix):]] = list(members)
+        return out
+
+    def set_kern_group(self, side: int, name: str, glyphs: list[str], rename_from: str | None = None):
+        """Create, update or rename a kerning group. Glyphs added here leave
+        any other group on the same side (a glyph can only be in one)."""
+        if side not in KERN_SIDES:
+            raise ProjectError("side must be 1 or 2")
+        if not GROUP_NAME.match(name):
+            raise ProjectError(f"{name!r}: use letters, digits, _ . or - (and start with a letter or digit)")
+        with self.lock:
+            for g in glyphs:
+                self.glyph(g)
+            key = self.group_key(side, name)
+            if rename_from is not None and rename_from != name:
+                old = self.group_key(side, rename_from)
+                if old not in self.font.groups:
+                    raise ProjectError(f"No group {rename_from!r}")
+                if key in self.font.groups:
+                    raise ProjectError(f"There is already a group {name!r} on that side")
+                del self.font.groups[old]
+                self._rename_in_kerning(old, key, side)
+            members = list(dict.fromkeys(glyphs))
+            prefix = f"public.kern{side}."
+            for other, other_members in list(self.font.groups.items()):
+                if other.startswith(prefix) and other != key:
+                    self.font.groups[other] = [g for g in other_members if g not in members]
+            self.font.groups[key] = members
+            self._commit()
+
+    def delete_kern_group(self, side: int, name: str):
+        """Remove a group and every pair that uses it."""
+        with self.lock:
+            key = self.group_key(side, name)
+            if key not in self.font.groups:
+                raise ProjectError(f"No group {name!r}")
+            uses = [pair for pair in self.font.kerning if key in pair]
+            if uses:
+                self.snapshot(f"Before deleting kerning group @{name} ({len(uses)} pairs)")
+            for pair in uses:
+                del self.font.kerning[pair]
+            del self.font.groups[key]
+            self._commit()
+
+    def _rename_in_kerning(self, old: str, new: str, side: int):
+        for (first, second), value in list(self.font.kerning.items()):
+            if (first if side == 1 else second) == old:
+                del self.font.kerning[(first, second)]
+                pair = (new, second) if side == 1 else (first, new)
+                self.font.kerning[pair] = value
 
     def set_ligatures(self, rules: list[dict]):
         with self.lock:
@@ -557,6 +638,7 @@ class Project:
                     {"first": first, "second": second, "value": value}
                     for (first, second), value in sorted(self.font.kerning.items())
                 ],
+                "kernGroups": self.kern_groups(),
             }
 
     def _glyph_summary(self, glyph, categories) -> dict:
@@ -564,6 +646,7 @@ class Project:
             "name": glyph.name,
             "unicode": glyph.unicodes[0] if glyph.unicodes else None,
             "char": naming.display_char(glyph.name),
+            "niceName": hebrew.LETTER_NAMES.get(glyph.unicodes[0]) if glyph.unicodes else None,
             "category": categories.get(glyph.name, "base"),
             "width": glyph.width,
             "source": glyph.lib.get(SOURCE),

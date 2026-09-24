@@ -10,6 +10,8 @@ export interface Glyph {
   name: string
   unicode: number | null
   char: string
+  /** readable ASCII name for Hebrew letters (e.g. "bet"), used for default group names */
+  niceName: string | null
   category: Category
   width: number
   source: string | null
@@ -60,7 +62,10 @@ export interface Project {
   info: FontInfo
   glyphs: Glyph[]
   ligatures: LigatureRule[]
+  /** pairs; `first`/`second` are glyph names or group keys like "public.kern1.round" */
   kerning: KernPair[]
+  /** kerning groups by side: "1" = first glyph of a pair (right-hand in Hebrew), "2" = second */
+  kernGroups: Record<'1' | '2', Record<string, string[]>>
 }
 
 export interface ImportReport {
@@ -174,6 +179,10 @@ export const api = {
   setLigatures: (rules: LigatureRule[]) => call<Project>('PUT', '/api/ligatures', { rules }),
   setKern: (first: string, second: string, value: number) =>
     call<Project>('PUT', '/api/kerning', { first, second, value }),
+  setKernGroup: (side: 1 | 2, name: string, glyphs: string[], renameFrom?: string) =>
+    call<Project>('PUT', '/api/kerning/groups', { side, name, glyphs, renameFrom }),
+  deleteKernGroup: (side: 1 | 2, name: string) =>
+    call<Project>('POST', '/api/kerning/groups/delete', { side, name }),
   exportOtf: () => call<{ path: string; bytes: number }>('POST', '/api/export'),
   fontBinary: async (): Promise<ArrayBuffer> => {
     const res = await fetch('/api/font.otf')

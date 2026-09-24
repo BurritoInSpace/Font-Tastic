@@ -183,3 +183,71 @@ def test_import_api(project):
     ]})
     body = r.json()
     assert body["added"] == ["uni05D2"] and "uni05D0" in body["errors"]
+
+
+# -- class-based kerning -----------------------------------------------------------
+
+
+def pair_width(data, text):
+    font = hb.Font(hb.Face(data))
+    buf = hb.Buffer()
+    buf.add_str(text)
+    buf.guess_segment_properties()
+    hb.shape(font, buf, {})
+    return sum(p.x_advance for p in buf.glyph_positions)
+
+
+def test_group_kerning_with_exception(project):
+    plain = compile_otf(project.font)
+    base = {t: pair_width(plain, t) for t in ("בת", "כת", "כד", "דב")}
+
+    project.set_kern_group(1, "flatleft", ["uni05D1", "uni05DB"])  # bet, kaf as the right-hand letter
+    project.set_kern_group(2, "stem", ["uni05EA", "uni05D3"])  # tav, dalet as the left-hand letter
+    project.set_kerning("public.kern1.flatleft", "public.kern2.stem", -50)
+    project.set_kerning("uni05D1", "uni05EA", -80)  # exception: bet+tav
+
+    data = compile_otf(project.font)
+    assert pair_width(data, "בת") == base["בת"] - 80  # exception wins
+    assert pair_width(data, "כת") == base["כת"] - 50  # from the groups
+    assert pair_width(data, "כד") == base["כד"] - 50
+    assert pair_width(data, "דב") == base["דב"]  # dalet isn't in a kern1 group
+
+
+def test_group_membership_is_exclusive_per_side(project):
+    project.set_kern_group(1, "a", ["uni05D1", "uni05DB"])
+    project.set_kern_group(1, "b", ["uni05D1"])
+    project.set_kern_group(2, "c", ["uni05D1"])  # the other side is independent
+    groups = project.kern_groups()
+    assert groups["1"] == {"a": ["uni05DB"], "b": ["uni05D1"]}
+    assert groups["2"] == {"c": ["uni05D1"]}
+
+
+def test_rename_and_delete_group_keep_kerning_consistent(project):
+    project.set_kern_group(1, "old", ["uni05D1"])
+    project.set_kerning("public.kern1.old", "uni05EA", -30)
+    project.set_kern_group(1, "new", ["uni05D1"], rename_from="old")
+    assert project.font.kerning == {("public.kern1.new", "uni05EA"): -30}
+
+    project.delete_kern_group(1, "new")
+    assert project.font.kerning == {} and "public.kern1.new" not in project.font.groups
+    assert "@new" in project.snapshots()[0]["reason"]
+
+
+def test_group_validation(project):
+    project.set_kern_group(2, "right", ["uni05EA"])
+    with pytest.raises(Exception):
+        project.set_kerning("public.kern2.right", "uni05D1", -10)  # a kern2 group can't come first
+    with pytest.raises(Exception):
+        project.set_kern_group(1, "bad name", ["uni05D1"])
+    with pytest.raises(Exception):
+        project.set_kern_group(1, "ok", ["nope"])
+
+
+def test_kern_group_api(project):
+    client = TestClient(create_app(project, watch=False))
+    r = client.put("/api/kerning/groups", json={"side": 1, "name": "flat", "glyphs": ["uni05D1"]})
+    assert r.status_code == 200 and r.json()["kernGroups"]["1"] == {"flat": ["uni05D1"]}
+    r = client.put("/api/kerning", json={"first": "public.kern1.flat", "second": "uni05EA", "value": -20})
+    assert r.json()["kerning"] == [{"first": "public.kern1.flat", "second": "uni05EA", "value": -20}]
+    r = client.post("/api/kerning/groups/delete", json={"side": 1, "name": "flat"})
+    assert r.json()["kernGroups"]["1"] == {} and r.json()["kerning"] == []

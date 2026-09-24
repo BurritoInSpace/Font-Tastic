@@ -288,3 +288,35 @@ input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px s
 .live::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .live.on { color: var(--text); }
 .live.on::before { background: #3ecf8e; box-shadow: 0 0 0 3px color-mix(in srgb, #3ecf8e 25%, transparent); }
+
+/* class-based kerning ------------------------------------------------------ */
+
+.side-control { display: inline-flex; flex-direction: column; gap: 4px; align-items: stretch; }
+.side-control .segmented button { font-size: 12px; padding: 2px 8px; }
+.side-control .link { align-self: flex-start; }
+.kern-caption { line-height: 1.6; }
+.kern-caption > div { margin-top: 2px; }
+.kern-caption strong { font-size: 15px; }
+.group-chip, .glyph-chip {
+  display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 14px;
+  background: var(--panel-2); border: 1px solid var(--line);
+}
+.group-chip { color: var(--accent); font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+.glyph-chip { font-size: 20px; line-height: 1.2; }
+.panel h5 { margin: 0; font-size: 13px; font-weight: 600; }
+.group-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.group-column { display: flex; flex-direction: column; gap: 8px; }
+.group-card {
+  padding: 8px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.group-card .row input { width: 140px; font-family: ui-monospace, Consolas, monospace; }
+.group-at { color: var(--accent); font-family: ui-monospace, Consolas, monospace; }
+.members { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.member {
+  display: inline-flex; align-items: center; font-size: 20px; line-height: 1;
+  padding: 2px 2px 2px 8px; border-radius: 6px; background: var(--panel-2);
+}
+.member .icon { font-size: 14px; padding: 0 4px; }
+.add-letters { width: 90px; }
+.new-group input:first-child { width: 150px; }

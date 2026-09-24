@@ -87,6 +87,13 @@ def _build_aliases():
 
 ALIASES = _build_aliases()
 
+# Plain ASCII names, used wherever a readable identifier is needed (e.g. the
+# default name of a kerning group started from a letter).
+LETTER_NAMES = dict(zip(LETTERS, (
+    "alef bet gimel dalet he vav zayin het tet yod finalkaf kaf lamed finalmem mem "
+    "finalnun nun samekh ayin finalpe pe finaltsadi tsadi qof resh shin tav"
+).split()))
+
 
 def is_hebrew_letter(cp: int | None) -> bool:
     return cp is not None and cp in LETTERS

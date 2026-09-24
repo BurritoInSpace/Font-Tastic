@@ -160,22 +160,36 @@ app are kept.
 
 ### Kerning
 
-The **Kerning** tab kerns specific glyph pairs. Type the pair the way you
-write it (`בת`) or pick the glyphs from the menus. The pair is stored in
-reading order, so the first glyph is the one on the right. Negative values
-pull the pair together. The pair view redraws as you adjust, with optional
-context letters on both sides, and the HarfBuzz preview below shows the
-compiled result. Pairs live in the UFO's `kerning.plist`.
+The **Kerning** tab kerns pairs of letters, or whole **groups** of letters
+that share an edge shape. Type the pair the way you write it (`בת`) or pick
+the letters from the menus. Pairs are stored in reading order, so the first
+letter is the one on the right. Negative values pull the pair together. The
+pair view redraws as you adjust, with optional context letters on both
+sides, and the HarfBuzz preview below shows the compiled result.
+
+- **Groups come in two kinds.** **Right-hand letter groups** collect letters
+  whose *left* edge looks alike: the edge facing the next letter. **Left-hand
+  letter groups** collect letters whose *right* edge looks alike. A letter
+  can be in one group of each kind. In the UFO these are `public.kern1.*`
+  and `public.kern2.*` groups.
+- Each side of the pair editor switches between **letter** and **@group**,
+  so one value can cover every combination (the caption says how many), and
+  **+ group** starts a new group from a letter.
+- **Exceptions:** a single letter pair overrides its groups. The most
+  specific value wins: letter+letter, then letter+group, group+letter,
+  group+group. The editor says when a pair's value comes from somewhere
+  else, with a link to it.
+- Deleting a group also removes the pairs that use it (a snapshot is taken
+  first).
 
 ## Status
 
-Phase 1, first slice: SVG import → anchors → widths → pair kerning →
+Phase 1, first slice: SVG import → anchors → widths → pair and group kerning →
 ligatures and alternates → compile → RTL preview, plus project handling
 (project files, New/Open/recent, snapshots) and the live Illustrator round
 trip (folder watcher, Edit in Illustrator).
 
 Next:
-- Class-based kerning (groups such as "all round-bottomed letters")
 - UI overhaul, designed in Figma (see the brief)
 - Porting logic from the existing FontForge script
 - Variable fonts (Phase 2)

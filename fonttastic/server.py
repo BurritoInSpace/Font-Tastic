@@ -90,6 +90,13 @@ class KernRequest(BaseModel):
     value: float
 
 
+class KernGroupRequest(BaseModel):
+    side: int
+    name: str
+    glyphs: list[str] = []
+    renameFrom: str | None = None
+
+
 class State:
     def __init__(self, project: Project | None, watch: bool):
         self.watch = watch
@@ -284,6 +291,18 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
     def put_kerning(req: KernRequest):
         project = state.require()
         guard(project.set_kerning, req.first, req.second, req.value)
+        return project.summary()
+
+    @app.put("/api/kerning/groups")
+    def put_kern_group(req: KernGroupRequest):
+        project = state.require()
+        guard(project.set_kern_group, req.side, req.name, req.glyphs, req.renameFrom)
+        return project.summary()
+
+    @app.post("/api/kerning/groups/delete")
+    def delete_kern_group(req: KernGroupRequest):
+        project = state.require()
+        guard(project.delete_kern_group, req.side, req.name)
         return project.summary()
 
     @app.get("/api/font.otf")
