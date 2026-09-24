@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="images/fontastic%20logo%20dark%20bg.png">
+    <img src="images/fontastic%20logo.png" alt="Font-tastic logo" width="160">
+  </picture>
+</p>
+
 # Font-tastic
 
 A Hebrew-first font editor. **Illustrator draws the glyph outlines; Font-tastic
