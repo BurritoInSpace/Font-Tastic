@@ -182,7 +182,7 @@ export default function App() {
           {tab === 'glyph' &&
             (glyph ? (
               <GlyphEditor project={project} glyph={glyph} onChanged={refresh} onError={onError}
-                onMessage={(text) => setMessage({ text })} />
+                onMessage={(text) => setMessage({ text })} onOpenGlyph={setSelected} />
             ) : (
               <div className="empty">Pick a glyph on the left to place its anchors.</div>
             ))}

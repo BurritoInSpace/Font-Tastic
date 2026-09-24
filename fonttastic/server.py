@@ -90,6 +90,10 @@ class KernRequest(BaseModel):
     value: float
 
 
+class DuplicateRequest(BaseModel):
+    unicode: int
+
+
 class KernGroupRequest(BaseModel):
     side: int
     name: str
@@ -246,6 +250,13 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
         except OSError as exc:
             raise HTTPException(500, f"Couldn't start Illustrator: {exc}")
         return {"path": str(path), "app": app_name, "created": created, "project": project.summary()}
+
+    @app.post("/api/glyphs/{name}/duplicate")
+    def duplicate_glyph(name: str, req: DuplicateRequest):
+        """Duplicate a niqqud mark as another one (e.g. dagesh -> holam)."""
+        project = state.require()
+        created = guard(project.duplicate_mark, name, req.unicode)
+        return {"name": created, "project": project.summary()}
 
     @app.post("/api/glyphs/{name}/reveal")
     def reveal_glyph(name: str):

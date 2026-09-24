@@ -128,6 +128,25 @@ def default_base_anchors(cp, width, bounds, cap_height):
     return anchors
 
 
+MARK_GAP = 60  # font units between a letter and a mark placed next to it
+
+
+def mark_anchor_beside(anchor_class, bounds, gap=MARK_GAP):
+    """A mark's anchor chosen from its own shape rather than where it was
+    drawn: top marks sit ``gap`` above the letter's anchor, bottom marks
+    ``gap`` below it, dagesh centred on it. Used when a mark is duplicated
+    as a different mark, whose drawing sits in the wrong place for its class."""
+    if bounds is None:
+        return None
+    x_min, y_min, x_max, y_max = bounds
+    cx = round((x_min + x_max) / 2)
+    if anchor_class == "bottom":
+        return (cx, round(y_max + gap))
+    if anchor_class == "dagesh":
+        return (cx, round((y_min + y_max) / 2))
+    return (cx, round(y_min - gap))  # top, shindot, sindot
+
+
 def default_mark_anchor(anchor_class, bounds, cap_height):
     """Where a mark's ``_<class>`` anchor starts, assuming the designer drew
     the mark in position relative to a letter sitting on the baseline."""

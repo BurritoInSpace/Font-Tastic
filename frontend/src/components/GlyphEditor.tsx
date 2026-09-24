@@ -8,17 +8,26 @@ interface Props {
   onChanged: () => void
   onError: (msg: string) => void
   onMessage?: (msg: string) => void
+  /** jump to another glyph (e.g. one just created) */
+  onOpenGlyph?: (name: string) => void
 }
 
 const PAD = 160
 
-export function GlyphEditor({ project, glyph, onChanged, onError, onMessage }: Props) {
+export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onOpenGlyph }: Props) {
   const [anchors, setAnchors] = useState<Anchor[]>(glyph.anchors)
   const [active, setActive] = useState<number | null>(null)
   const [showGhosts, setShowGhosts] = useState(true)
   const [ghostChoice, setGhostChoice] = useState<Record<string, string>>({})
   const groupRef = useRef<SVGGElement>(null)
-  const drag = useRef<{ index: number; moved: boolean } | null>(null)
+  const drag = useRef<{
+    index: number
+    moved: boolean
+    /** 'mark': the mark is dragged over a fixed letter (its anchor moves the opposite way) */
+    mode: 'anchor' | 'mark'
+    start: { x: number; y: number }
+    origin: Anchor
+  } | null>(null)
   const nudgeTimer = useRef<number | undefined>(undefined)
 
   // Server state wins whenever the glyph (or the project revision) changes.
@@ -55,18 +64,22 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage }: P
     return { x: Math.round(pt.x), y: Math.round(pt.y) }
   }
 
-  const onPointerDown = (index: number) => (e: React.PointerEvent) => {
+  const onPointerDown = (index: number, mode: 'anchor' | 'mark' = 'anchor') => (e: React.PointerEvent) => {
     e.stopPropagation()
     ;(e.target as Element).setPointerCapture(e.pointerId)
-    drag.current = { index, moved: false }
+    drag.current = { index, moved: false, mode, start: toFont(e), origin: anchors[index] }
     setActive(index)
   }
   const onPointerMove = (e: React.PointerEvent) => {
-    if (!drag.current) return
-    const { x, y } = toFont(e)
-    drag.current.moved = true
-    const i = drag.current.index
-    setAnchors((prev) => prev.map((a, j) => (j === i ? { ...a, x, y } : a)))
+    const d = drag.current
+    if (!d) return
+    const p = toFont(e)
+    d.moved = true
+    const moved = d.mode === 'mark'
+      // the mark follows the pointer, so its attachment anchor moves the other way
+      ? { x: d.origin.x - (p.x - d.start.x), y: d.origin.y - (p.y - d.start.y) }
+      : { x: p.x - viewOffset.x, y: p.y - viewOffset.y }
+    setAnchors((prev) => prev.map((a, j) => (j === d.index ? { ...a, ...moved } : a)))
   }
   const onPointerUp = () => {
     if (drag.current?.moved) void commit(anchors)
@@ -93,7 +106,8 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage }: P
       }
       if (!d) return
       e.preventDefault()
-      const next = anchors.map((a, j) => (j === active ? { ...a, x: a.x + d[0], y: a.y + d[1] } : a))
+      const sign = attach && active === attach.index ? -1 : 1 // arrows move the mark, not its anchor
+      const next = anchors.map((a, j) => (j === active ? { ...a, x: a.x + sign * d[0], y: a.y + sign * d[1] } : a))
       setAnchors(next)
       window.clearTimeout(nudgeTimer.current)
       nudgeTimer.current = window.setTimeout(() => void commit(next), 350)
@@ -105,15 +119,14 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage }: P
   const { info } = project
   const isMark = glyph.category === 'mark'
   const [bx0, by0, bx1, by1] = glyph.bounds ?? [0, 0, glyph.width, 0]
-  const x0 = Math.min(0, bx0) - PAD
-  const x1 = Math.max(glyph.width, bx1, x0 + PAD + 200) + PAD
-  const yTop = Math.max(info.ascender, by1) + PAD
-  const yBottom = Math.min(info.descender, by0) - PAD
 
-  // Ghost glyphs: marks hanging off this base's anchors, or a base under this mark.
+  // Companions: marks hanging off this base's anchors, or letters a mark can sit on.
   const ghosts: { key: string; glyph: Glyph; dx: number; dy: number }[] = []
   const companions: { anchor: string; options: Glyph[]; chosen: Glyph | undefined }[] = []
-  for (const a of anchors) {
+  // A mark shown on a letter is drawn in the letter's space: the letter stays
+  // put and the mark (with its anchors) is offset onto the letter's anchor.
+  let attach: { index: number; base: Glyph; offset: { x: number; y: number } } | null = null
+  for (const [i, a] of anchors.entries()) {
     const options = isMark
       ? a.name.startsWith('_') ? basesFor(project, a.name) : []
       : a.name.startsWith('_') ? [] : marksFor(project, a.name)
@@ -123,8 +136,24 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage }: P
     if (!showGhosts || !chosen) continue
     const partnerName = isMark ? a.name.slice(1) : `_${a.name}`
     const pa = chosen.anchors.find((p) => p.name === partnerName)
-    if (pa) ghosts.push({ key: a.name, glyph: chosen, dx: a.x - pa.x, dy: a.y - pa.y })
+    if (!pa) continue
+    if (isMark) {
+      if (!attach) attach = { index: i, base: chosen, offset: { x: pa.x - a.x, y: pa.y - a.y } }
+    } else {
+      ghosts.push({ key: a.name, glyph: chosen, dx: a.x - pa.x, dy: a.y - pa.y })
+    }
   }
+  const viewOffset = attach ? attach.offset : { x: 0, y: 0 }
+  const shown = (a: Anchor) => ({ x: a.x + viewOffset.x, y: a.y + viewOffset.y })
+
+  // Frame the letter (in attached view) or the glyph itself. Doesn't depend on
+  // anchors, so the view holds still while dragging.
+  const frame = attach ? attach.base : glyph
+  const [fx0, fy0, fx1, fy1] = frame.bounds ?? [0, 0, frame.width, 0]
+  const x0 = Math.min(0, fx0, attach ? 0 : bx0) - PAD
+  const x1 = Math.max(frame.width, fx1, attach ? 0 : bx1, x0 + PAD + 200) + PAD
+  const yTop = Math.max(info.ascender, fy1, attach ? 0 : by1) + PAD
+  const yBottom = Math.min(info.descender, fy0, attach ? 0 : by0) - PAD
 
   const metricLines = [
     { y: info.ascender, label: 'ascender' },
@@ -143,9 +172,25 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage }: P
     void commit(next)
   }
 
-  const suggestions = STANDARD_ANCHORS.map((n) => (isMark ? `_${n}` : n)).filter(
+  // A mark attaches through exactly one anchor (_top, _bottom, ...); offer the
+  // choice only while it has none. Stacking anchors (…mkmk) go in "custom".
+  const attached = anchors.some((a) => a.name.startsWith('_') && !a.name.endsWith('mkmk'))
+  const suggestions = isMark && attached ? [] : STANDARD_ANCHORS.map((n) => (isMark ? `_${n}` : n)).filter(
     (n) => !anchors.some((a) => a.name === n),
   )
+
+  const inFont = new Set(project.glyphs.flatMap((g) => (g.unicode === null ? [] : [g.unicode])))
+  const duplicateAs = async (cp: number) => {
+    const nameOf = (u: number | null) => project.niqqud.find((n) => n.unicode === u)?.name
+    try {
+      const res = await api.duplicateGlyph(glyph.name, cp)
+      onMessage?.(`Made ${nameOf(cp) ?? res.name} from ${nameOf(glyph.unicode) ?? glyph.name}. Drag it into place on a letter.`)
+      onChanged()
+      onOpenGlyph?.(res.name)
+    } catch (e) {
+      onError(String(e))
+    }
+  }
 
   return (
     <div className="editor">
@@ -162,15 +207,19 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage }: P
               <line key={m.label} className={`metric ${m.label === 'baseline' ? 'baseline' : ''}`}
                 x1={x0} x2={x1} y1={m.y} y2={m.y} />
             ))}
-            <rect className="advance" x={0} y={info.descender} width={glyph.width}
+            <rect className="advance" x={0} y={info.descender} width={frame.width}
               height={info.ascender - info.descender} />
             {ghosts.map((g) => (
               <path key={g.key} className="ghost" d={g.glyph.path} transform={`translate(${g.dx},${g.dy})`} />
             ))}
-            <path className="outline" d={glyph.path} />
+            {attach && <path className="ghost base-ghost" d={attach.base.path} />}
+            <path className={`outline${attach ? ' draggable' : ''}`} d={glyph.path}
+              transform={`translate(${viewOffset.x},${viewOffset.y})`}
+              onPointerDown={attach ? onPointerDown(attach.index, 'mark') : undefined} />
             {anchors.map((a, i) => (
               <g key={i} className={`anchor${i === active ? ' active' : ''}${a.name.startsWith('_') ? ' mark-anchor' : ''}`}
-                transform={`translate(${a.x},${a.y})`} onPointerDown={onPointerDown(i)}>
+                transform={`translate(${shown(a).x},${shown(a).y})`}
+                onPointerDown={onPointerDown(i, attach && i === attach.index ? 'mark' : 'anchor')}>
                 <circle r={18} />
                 <line x1={-34} x2={34} y1={0} y2={0} />
                 <line x1={0} x2={0} y1={-34} y2={34} />
@@ -181,7 +230,8 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage }: P
             <text key={m.label} className="metric-label" x={x0 + 12} y={-m.y - 10}>{m.label}</text>
           ))}
           {anchors.map((a, i) => (
-            <text key={i} className={`anchor-label${a.name.startsWith('_') ? ' mark-anchor' : ''}`} x={a.x + 26} y={-a.y - 26}>{a.name}</text>
+            <text key={i} className={`anchor-label${a.name.startsWith('_') ? ' mark-anchor' : ''}`}
+              x={shown(a).x + 26} y={-shown(a).y - 26}>{a.name}</text>
           ))}
         </svg>
       </div>
@@ -249,7 +299,26 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage }: P
           ))}
           <CommitInput value="" placeholder="custom…" onCommit={(v) => addAnchor(v.trim())} />
         </div>
-        <p className="hint">Drag anchors on the canvas · arrow keys nudge (Shift ×10) · Delete removes</p>
+        <p className="hint">
+          {attach
+            ? `Drag the mark onto ${attach.base.char || attach.base.name} to place it · arrow keys nudge the mark (Shift ×10)`
+            : 'Drag anchors on the canvas · arrow keys nudge (Shift ×10) · Delete removes'}
+        </p>
+
+        {isMark && !glyph.auto && (
+          <div className="row">
+            <label className="muted" htmlFor="duplicate-as">Duplicate as</label>
+            <select id="duplicate-as" value="" onChange={(e) => e.target.value && void duplicateAs(Number(e.target.value))}
+              title="Make another niqqud mark from this drawing, with its own anchor and SVG">
+              <option value="">choose a mark…</option>
+              {project.niqqud.filter((n) => n.unicode !== glyph.unicode).map((n) => (
+                <option key={n.unicode} value={n.unicode} disabled={inFont.has(n.unicode)}>
+                  {'\u25CC' + String.fromCodePoint(n.unicode)}  {n.name}{inFont.has(n.unicode) ? ' (already in the font)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {companions.length > 0 && (
           <>

@@ -133,6 +133,8 @@ input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px s
 .canvas .advance { fill: none; stroke: var(--accent); stroke-width: 1; stroke-dasharray: 6 5; vector-effect: non-scaling-stroke; opacity: 0.7; }
 .canvas .outline { fill: var(--glyph); }
 .canvas .ghost { fill: var(--ghost); }
+.canvas .base-ghost { fill: var(--muted); opacity: 0.45; }
+.canvas .outline.draggable { cursor: move; }
 .canvas .anchor { cursor: grab; color: var(--anchor); }
 .canvas .anchor.mark-anchor { color: var(--mark-anchor); }
 .canvas .anchor circle { fill: var(--canvas); fill-opacity: 0.6; stroke: currentColor; stroke-width: 3; vector-effect: non-scaling-stroke; }

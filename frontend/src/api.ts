@@ -66,6 +66,8 @@ export interface Project {
   kerning: KernPair[]
   /** kerning groups by side: "1" = first glyph of a pair (right-hand in Hebrew), "2" = second */
   kernGroups: Record<'1' | '2', Record<string, string[]>>
+  /** the core niqqud marks the app knows, with the anchor class each attaches to */
+  niqqud: { unicode: number; name: string; anchor: string }[]
 }
 
 export interface ImportReport {
@@ -170,6 +172,8 @@ export const api = {
   editGlyph: (glyph: string) =>
     call<{ path: string; app: string; created: boolean; project: Project }>(
       'POST', `/api/glyphs/${encodeURIComponent(glyph)}/edit`),
+  duplicateGlyph: (glyph: string, unicode: number) =>
+    call<{ name: string; project: Project }>('POST', `/api/glyphs/${encodeURIComponent(glyph)}/duplicate`, { unicode }),
   revealGlyph: (glyph: string) => call<{ path: string }>('POST', `/api/glyphs/${encodeURIComponent(glyph)}/reveal`),
   setAnchors: (glyph: string, anchors: Anchor[]) =>
     call<Glyph>('PUT', `/api/glyphs/${encodeURIComponent(glyph)}/anchors`, { anchors }),

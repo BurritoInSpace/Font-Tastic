@@ -251,3 +251,37 @@ def test_kern_group_api(project):
     assert r.json()["kerning"] == [{"first": "public.kern1.flat", "second": "uni05EA", "value": -20}]
     r = client.post("/api/kerning/groups/delete", json={"side": 1, "name": "flat"})
     assert r.json()["kernGroups"]["1"] == {} and r.json()["kerning"] == []
+
+
+# -- duplicate a mark as another mark ----------------------------------------------
+
+
+@pytest.fixture
+def no_holam(project):
+    (project.glyphs_dir / "uni05B9.svg").unlink()
+    del project.font["uni05B9"]
+    return project
+
+
+def test_duplicate_mark_gets_its_own_anchor_and_file(no_holam):
+    p = no_holam
+    name = p.duplicate_mark("uni05BC", 0x05B9)  # dagesh dot -> holam
+    holam = p.font[name]
+    assert holam.unicodes == [0x05B9] and holam.width == 0
+    assert (p.glyphs_dir / "uni05B9.svg").read_bytes() == (p.glyphs_dir / "uni05BC.svg").read_bytes()
+    (anchor,) = holam.anchors
+    assert anchor.name == "_top"
+    y_min = p.glyph_detail(name)["bounds"][1]
+    assert anchor.y == round(y_min - 60)  # sits just above the letter's top anchor
+    assert [a.name for a in p.font["uni05BC"].anchors] == ["_dagesh"]  # source untouched
+
+    data = compile_otf(p.font)
+    glyphs = shape(data, "\u05d5\u05b9")[1]  # vav + holam
+    assert [g[0] for g in glyphs] == ["uni05B9", "uni05D5"]
+
+
+def test_duplicate_mark_refuses_existing_and_non_niqqud(project):
+    with pytest.raises(Exception):
+        project.duplicate_mark("uni05BC", 0x05B9)  # the demo already has holam
+    with pytest.raises(Exception):
+        project.duplicate_mark("uni05BC", 0x05D0)  # alef isn't a mark

@@ -291,6 +291,34 @@ class Project:
             for name, x, y in hebrew.default_base_anchors(cp, glyph.width, bounds, info.capHeight):
                 glyph.appendAnchor({"name": name, "x": x, "y": y})
 
+    def duplicate_mark(self, source: str, target_cp: int) -> str:
+        """Make a new niqqud glyph from an existing mark's drawing, e.g. a
+        holam from the dagesh dot. The SVG is copied (the two are independent
+        from then on) and the copy gets the attachment anchor its own class
+        needs, placed from its shape so it sits next to letters right away."""
+        if target_cp not in hebrew.NIQQUD:
+            raise ProjectError(f"U+{target_cp:04X} is not a niqqud mark")
+        with self.lock:
+            if self.glyph(source).lib.get(AUTO):
+                raise ProjectError(f"{source} has no drawing to duplicate")
+            if any(target_cp in g.unicodes for g in self.font):
+                raise ProjectError(f"The font already has U+{target_cp:04X}")
+            name = naming.canonical_name(target_cp)
+            path = self.glyphs_dir / f"{name}.svg"
+            if path.exists():
+                raise ProjectError(f"{path.name} already exists in glyphs/")
+            source_path = self.source_svg(source)
+            path.write_bytes(source_path.read_bytes())
+            self._import_glyph(path, naming.parse_filename(path.stem))
+            glyph = self.font[name]
+            anchor_class = hebrew.mark_anchor_class(target_cp)
+            pos = hebrew.mark_anchor_beside(anchor_class, _bounds(glyph))
+            glyph.clearAnchors()
+            if pos:
+                glyph.appendAnchor({"name": f"_{anchor_class}", "x": pos[0], "y": pos[1]})
+            self._commit()
+            return name
+
     def _add_ligature_rule(self, parsed):
         rules = self.font.lib.setdefault(features.LIGATURES_KEY, [])
         if any(r["glyph"] == parsed.glyph_name for r in rules):
@@ -639,6 +667,10 @@ class Project:
                     for (first, second), value in sorted(self.font.kerning.items())
                 ],
                 "kernGroups": self.kern_groups(),
+                "niqqud": [
+                    {"unicode": cp, "name": name, "anchor": anchor}
+                    for cp, (name, anchor) in sorted(hebrew.NIQQUD.items())
+                ],
             }
 
     def _glyph_summary(self, glyph, categories) -> dict:

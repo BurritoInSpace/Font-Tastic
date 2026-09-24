@@ -155,6 +155,17 @@ On first import, Hebrew letters get `top`, `bottom` and `dagesh` anchors
 Ghost marks show the attachment live. ufo2ft turns `name` ↔ `_name` pairs
 into GPOS mark-to-base, and `namemkmk` ↔ `_namemkmk` into mark-to-mark.
 
+In a mark's view, the mark is shown on a letter (pick which under **Preview
+on base**): the letter stays put and you drag the mark itself into place,
+or nudge it with the arrow keys. The anchor value is worked out for you.
+
+A mark attaches through exactly one anchor, so the **+ _top / + _bottom…**
+choices only appear while it has none. To reuse a drawing for another mark
+(e.g. the dagesh dot as a holam), use **Duplicate as**. It makes the other
+mark as its own glyph with its own copy of the SVG, and gives it the right
+anchor, placed so it sits just above or below the letter. After that the two
+are independent.
+
 Re-importing an SVG replaces only its outline. Anchors and widths set in the
 app are kept.
 
