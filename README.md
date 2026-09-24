@@ -126,6 +126,27 @@ glyph's anchors.
 - Save As SVG with **Preserve Illustrator Editing Capabilities** on, so the
   file keeps reopening cleanly in Illustrator.
 
+### Editing in Illustrator (live round trip)
+
+Select a glyph and click **Edit in Illustrator** (or press Ctrl+E). Its SVG
+opens in your newest installed Illustrator, and each time you save there,
+the glyph updates in Font-tastic within a second or two. There's no
+re-import step: the app watches `glyphs/`, re-reads only the changed files,
+and keeps your anchors and widths. Files added to or edited in `glyphs/` by
+any other program are picked up the same way. The **Live** dot in the
+toolbar shows the watcher is running.
+
+- A glyph without an SVG (the auto-made `space`, or a glyph whose file was
+  deleted) gets one written from its current outline, on an artboard of the
+  right size, so you can start from what's there. A deleted source is
+  marked with a red **?** in the glyph list.
+- **Show file** reveals the glyph's SVG in Explorer.
+- To use a specific Illustrator, set `FONTTASTIC_ILLUSTRATOR` to its
+  `Illustrator.exe`. With no Illustrator installed, the file opens in the
+  default app for `.svg`.
+- When Illustrator asks for SVG options on save, keep **Preserve Illustrator
+  Editing Capabilities** on.
+
 ### Anchors
 
 On first import, Hebrew letters get `top`, `bottom` and `dagesh` anchors
@@ -150,11 +171,11 @@ compiled result. Pairs live in the UFO's `kerning.plist`.
 
 Phase 1, first slice: SVG import → anchors → widths → pair kerning →
 ligatures and alternates → compile → RTL preview, plus project handling
-(project files, New/Open/recent, snapshots).
+(project files, New/Open/recent, snapshots) and the live Illustrator round
+trip (folder watcher, Edit in Illustrator).
 
 Next:
 - Class-based kerning (groups such as "all round-bottomed letters")
-- Filesystem watcher and "Edit in Illustrator"
 - Porting logic from the existing FontForge script
 - Variable fonts (Phase 2)
 - Bilingual/multilingual fonts, Hebrew + Latin first (Phase 3, the end

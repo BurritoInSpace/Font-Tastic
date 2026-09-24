@@ -7,11 +7,12 @@ interface Props {
   glyph: Glyph
   onChanged: () => void
   onError: (msg: string) => void
+  onMessage?: (msg: string) => void
 }
 
 const PAD = 160
 
-export function GlyphEditor({ project, glyph, onChanged, onError }: Props) {
+export function GlyphEditor({ project, glyph, onChanged, onError, onMessage }: Props) {
   const [anchors, setAnchors] = useState<Anchor[]>(glyph.anchors)
   const [active, setActive] = useState<number | null>(null)
   const [showGhosts, setShowGhosts] = useState(true)
@@ -30,6 +31,19 @@ export function GlyphEditor({ project, glyph, onChanged, onError }: Props) {
     try {
       await api.setAnchors(glyph.name, next)
       onChanged()
+    } catch (e) {
+      onError(String(e))
+    }
+  }
+
+  const editInIllustrator = async () => {
+    try {
+      const res = await api.editGlyph(glyph.name)
+      onMessage?.(
+        `${res.created ? `Wrote ${glyph.name}.svg from the current outline and opened` : 'Opened'} it in ${res.app}. ` +
+          'Save there and it updates here.',
+      )
+      if (res.created) onChanged()
     } catch (e) {
       onError(String(e))
     }
@@ -61,7 +75,13 @@ export function GlyphEditor({ project, glyph, onChanged, onError }: Props) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (active === null || (e.target as HTMLElement).tagName === 'INPUT') return
+      if ((e.target as HTMLElement).tagName === 'INPUT') return
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') {
+        e.preventDefault()
+        void editInIllustrator()
+        return
+      }
+      if (active === null) return
       const step = e.shiftKey ? 10 : 1
       const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key]
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -177,6 +197,22 @@ export function GlyphEditor({ project, glyph, onChanged, onError }: Props) {
             </div>
           </div>
         </header>
+
+        <div className="row">
+          <button className="primary" onClick={() => void editInIllustrator()} title="Ctrl+E">
+            Edit in Illustrator
+          </button>
+          <button disabled={!glyph.source || glyph.sourceMissing}
+            onClick={() => api.revealGlyph(glyph.name).catch((e) => onError(String(e)))}
+            title={glyph.source ? `Show ${glyph.source} in Explorer` : 'No SVG yet'}>
+            Show file
+          </button>
+        </div>
+        {glyph.sourceMissing && (
+          <p className="warnings">
+            {glyph.source} was deleted or moved. The outline is kept; Edit in Illustrator writes a new SVG from it.
+          </p>
+        )}
 
         {glyph.warnings.length > 0 && (
           <ul className="warnings">{glyph.warnings.map((w) => <li key={w}>{w}</li>)}</ul>

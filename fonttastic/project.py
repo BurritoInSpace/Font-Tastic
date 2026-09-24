@@ -30,7 +30,7 @@ from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.svgPathPen import SVGPathPen
 
 from . import features, hebrew, naming
-from .svg_import import parse_svg, read_svg
+from .svg_import import outline_to_svg, parse_svg, read_svg
 
 LIB = "com.fonttastic"
 SOURCE = f"{LIB}.source"
@@ -210,22 +210,49 @@ class Project:
             for glyph in self.font:
                 if glyph.lib.get(SOURCE) and glyph.name not in seen:
                     report["missingSource"].append(glyph.name)
-            self._ensure_auto_glyphs()
-            self._commit()
+            added_auto = self._ensure_auto_glyphs()
+            # Only save when something changed: the watcher calls this for
+            # every burst of file events, including the app's own writes.
+            if report["imported"] or added_auto or force or not self.ufo_path.exists():
+                self._commit()
             return report
 
-    def import_file(self, path: Path) -> str:
+    def has_source(self, name: str) -> bool:
+        source = self.glyph(name).lib.get(SOURCE)
+        return bool(source) and (self.glyphs_dir / source).is_file()
+
+    def source_svg(self, name: str, create: bool = True) -> Path:
+        """The SVG behind a glyph. With ``create``, a glyph that has none (an
+        auto-made space, or one whose file was deleted) gets one written from
+        its current outline, on an artboard of the right size, so it can be
+        opened in Illustrator."""
         with self.lock:
-            parsed = naming.parse_filename(path.stem)
-            self._import_glyph(path, parsed)
+            glyph = self.glyph(name)
+            source = glyph.lib.get(SOURCE)
+            if self.has_source(name):
+                return self.glyphs_dir / source
+            if not create:
+                raise ProjectError(f"{name} has no SVG file")
+            if not SAFE_NAME.match(name) and name != ".notdef":
+                raise ProjectError(f"{name!r} can't be used as a file name")
+            info = self.font.info
+            bounds = _bounds(glyph)
+            width = glyph.width
+            if width <= 0:  # marks: the artboard only needs to hold the drawing
+                width = max(round(bounds[2]) + 100 if bounds else 0, round(info.unitsPerEm * 0.6))
+            path = self.glyphs_dir / (source or f"{name}.svg")
+            path.write_text(outline_to_svg(glyph, width, info.ascender, info.descender), encoding="utf-8")
+            self._import_glyph(path, naming.parse_filename(path.stem))
             self._commit()
-            return parsed.glyph_name
+            return path
 
     def _import_glyph(self, path: Path, parsed: naming.GlyphFileName):
         info = self.font.info
         outline = read_svg(path, info.ascender, info.descender)
         is_new = parsed.glyph_name not in self.font
-        glyph = self.font.get(parsed.glyph_name) or self.font.newGlyph(parsed.glyph_name)
+        glyph = self.font.get(parsed.glyph_name)
+        if glyph is None:  # not `or`: a glyph with no contours is falsy
+            glyph = self.font.newGlyph(parsed.glyph_name)
 
         glyph.clearContours()
         outline.draw_points(glyph.getPointPen())
@@ -269,9 +296,11 @@ class Project:
         feature = parsed.suffix if parsed.suffix and naming.LIGATURE_FEATURES.match(parsed.suffix) else "liga"
         rules.append({"components": list(parsed.components), "glyph": parsed.glyph_name, "feature": feature})
 
-    def _ensure_auto_glyphs(self):
+    def _ensure_auto_glyphs(self) -> bool:
         info = self.font.info
+        added = False
         if ".notdef" not in self.font:
+            added = True
             g = self.font.newGlyph(".notdef")
             g.width = round(info.unitsPerEm * 0.5)
             pen = g.getPen()
@@ -290,6 +319,8 @@ class Project:
             g.unicodes = [0x20]
             g.width = round(info.unitsPerEm * 0.25)
             g.lib[AUTO] = True
+            added = True
+        return added
 
     # -- importing individual files (the "Import SVGs" button) ---------------
 
@@ -536,6 +567,7 @@ class Project:
             "category": categories.get(glyph.name, "base"),
             "width": glyph.width,
             "source": glyph.lib.get(SOURCE),
+            "sourceMissing": bool(glyph.lib.get(SOURCE)) and not self.has_source(glyph.name),
             "auto": bool(glyph.lib.get(AUTO)),
             "warnings": glyph.lib.get(WARNINGS, []),
             "widthOverride": bool(glyph.lib.get(WIDTH_OVERRIDE)),

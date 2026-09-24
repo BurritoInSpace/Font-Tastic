@@ -25,6 +25,7 @@ from fontTools.pens.areaPen import AreaPen
 from fontTools.pens.pointInsidePen import PointInsidePen
 from fontTools.pens.recordingPen import RecordingPen
 from fontTools.pens.reverseContourPen import ReverseContourPen
+from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.svgLib.path.parser import parse_path
 from fontTools.svgLib.path.shapes import PathBuilder
@@ -124,6 +125,21 @@ def parse_svg(data: bytes, ascender: float, descender: float) -> ImportedOutline
     if not contours:
         warnings.append("No filled shapes found.")
     return ImportedOutline(contours, vb_w * scale, _dedupe(warnings))
+
+
+def outline_to_svg(glyph, width: float, ascender: float, descender: float) -> str:
+    """The inverse of ``parse_svg``: a glyph's outline on an artboard that maps
+    back onto the same em box (1 font unit = 1 pt in Illustrator)."""
+    height = ascender - descender
+    pen = SVGPathPen(None, ntos=lambda v: f"{v:.2f}".rstrip("0").rstrip("."))
+    glyph.draw(TransformPen(pen, Transform(1, 0, 0, -1, 0, ascender)))
+    d = pen.getCommands()
+    shape = f'\n  <path d="{d}"/>' if d else ""
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:g} {height:g}" '
+        f'width="{width:g}px" height="{height:g}px">{shape}\n</svg>\n'
+    )
 
 
 # -- geometry ---------------------------------------------------------------

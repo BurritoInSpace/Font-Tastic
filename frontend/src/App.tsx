@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { api, readBase64, type ImportReport, type Project } from './api'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { api, readBase64, type ChangeEvent, type ImportReport, type Project } from './api'
 import { GlyphEditor } from './components/GlyphEditor'
 import { GlyphGrid } from './components/GlyphGrid'
 import { HomeScreen } from './components/HomeScreen'
@@ -18,6 +18,9 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('glyph')
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null)
   const [uploads, setUploads] = useState<Upload[] | null>(null)
+  const [watching, setWatching] = useState(false)
+  const revision = useRef<number | null>(null)
+  revision.current = project?.revision ?? null
 
   const refresh = useCallback(async () => {
     const { project } = await api.project()
@@ -27,6 +30,28 @@ export default function App() {
   useEffect(() => {
     refresh().finally(() => setLoading(false))
   }, [refresh])
+
+  // Live updates: the server watches glyphs/ and says when the project changed.
+  const projectFile = project?.file
+  useEffect(() => {
+    if (!projectFile) return
+    const source = new EventSource('/api/events')
+    source.addEventListener('hello', (e) => setWatching(JSON.parse((e as MessageEvent).data).watching))
+    source.addEventListener('change', (e) => {
+      const change: ChangeEvent = JSON.parse((e as MessageEvent).data)
+      if (revision.current !== null && change.revision <= revision.current) return // our own edit, already shown
+      void refresh()
+      if (!change.external) return
+      const errors = Object.entries(change.errors ?? {})
+      if (errors.length) {
+        setMessage({ text: `Couldn't read ${errors.map(([f, e]) => `${f} (${e})`).join('; ')}`, error: true })
+      } else if (change.imported?.length) {
+        setMessage({ text: `Updated from disk: ${change.imported.join(', ')}` })
+      }
+    })
+    source.onerror = () => setWatching(false)
+    return () => source.close()
+  }, [projectFile, refresh])
 
   // Keep the selection in the URL so reloads (and dev hot-reloads) keep it.
   useEffect(() => {
@@ -130,6 +155,11 @@ export default function App() {
           ))}
         </nav>
         <span className="spacer" />
+        <span className={`live${watching ? ' on' : ''}`}
+          title={watching ? 'Watching glyphs/: SVGs saved in Illustrator update here automatically'
+            : 'Not watching for changes; use Re-import'}>
+          {watching ? 'Live' : 'Not live'}
+        </span>
         {message && (
           <span className={`message${message.error ? ' error' : ''}`} onClick={() => setMessage(null)}>
             {message.text}
@@ -151,7 +181,8 @@ export default function App() {
         <div className="center">
           {tab === 'glyph' &&
             (glyph ? (
-              <GlyphEditor project={project} glyph={glyph} onChanged={refresh} onError={onError} />
+              <GlyphEditor project={project} glyph={glyph} onChanged={refresh} onError={onError}
+                onMessage={(text) => setMessage({ text })} />
             ) : (
               <div className="empty">Pick a glyph on the left to place its anchors.</div>
             ))}

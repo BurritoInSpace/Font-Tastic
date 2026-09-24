@@ -68,7 +68,9 @@ export function GlyphGrid({ glyphs, info, selected, onSelect, onImport }: Props)
               >
                 <GlyphThumb glyph={g} info={info} />
                 <span className="cell-label">{g.char || glyphLabel(g)}</span>
-                {g.warnings.length > 0 && <span className="badge warn" title={g.warnings.join('\n')}>!</span>}
+                {g.sourceMissing ? (
+                  <span className="badge missing" title="The SVG file was deleted or moved">?</span>
+                ) : g.warnings.length > 0 && <span className="badge warn" title={g.warnings.join('\n')}>!</span>}
               </button>
             ))}
           </div>

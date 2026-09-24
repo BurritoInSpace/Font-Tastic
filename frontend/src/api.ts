@@ -13,6 +13,8 @@ export interface Glyph {
   category: Category
   width: number
   source: string | null
+  /** the glyph came from an SVG that has since been deleted or moved */
+  sourceMissing: boolean
   auto: boolean
   warnings: string[]
   widthOverride: boolean
@@ -99,6 +101,16 @@ export interface Snapshot {
   files: string[]
 }
 
+/** What the server pushes on /api/events when the project changes. */
+export interface ChangeEvent {
+  revision: number
+  /** true when the change came from files on disk (the watcher), not from the UI */
+  external: boolean
+  imported?: string[]
+  errors?: Record<string, string>
+  missingSource?: string[]
+}
+
 export class ApiError extends Error {
   /** machine-readable reason, e.g. "needs-conversion" */
   code?: string
@@ -150,6 +162,10 @@ export const api = {
     call<{ files: UploadAnalysis[] }>('POST', '/api/import/analyze', { files }),
   addGlyphFiles: (files: AddFile[]) =>
     call<{ project: Project; added: string[]; errors: Record<string, string> }>('POST', '/api/import/add', { files }),
+  editGlyph: (glyph: string) =>
+    call<{ path: string; app: string; created: boolean; project: Project }>(
+      'POST', `/api/glyphs/${encodeURIComponent(glyph)}/edit`),
+  revealGlyph: (glyph: string) => call<{ path: string }>('POST', `/api/glyphs/${encodeURIComponent(glyph)}/reveal`),
   setAnchors: (glyph: string, anchors: Anchor[]) =>
     call<Glyph>('PUT', `/api/glyphs/${encodeURIComponent(glyph)}/anchors`, { anchors }),
   setWidth: (glyph: string, width: number | null) =>
