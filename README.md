@@ -176,6 +176,7 @@ trip (folder watcher, Edit in Illustrator).
 
 Next:
 - Class-based kerning (groups such as "all round-bottomed letters")
+- UI overhaul, designed in Figma (see the brief)
 - Porting logic from the existing FontForge script
 - Variable fonts (Phase 2)
 - Bilingual/multilingual fonts, Hebrew + Latin first (Phase 3, the end

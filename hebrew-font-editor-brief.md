@@ -161,6 +161,27 @@ lives inside it.
 - **Later:** Windows file association, so double-clicking `MyFont.fonttastic`
   opens the app on that project.
 
+## UI overhaul (designed in Figma)
+
+**Goal:** replace the current functional-but-plain UI with a proper design.
+The project's author designs it in Figma, then hands it over for
+implementation. Until then, UI work stays functional and doesn't invest in
+visual polish that the redesign will replace.
+
+- **Handoff:** Figma frames for each screen (home, glyph editor, kerning,
+  ligatures, project, import dialog) and their states (empty, error,
+  selected, dragging). The design is either read directly through the Figma
+  connector or exported as images plus Dev Mode specs.
+- **Design tokens first:** colours, type, spacing and radii as Figma
+  variables. They map one-to-one onto the CSS custom properties the UI
+  already uses (`frontend/src/index.css`), so a reskin is mostly a token
+  swap. Light and dark themes can both be defined there.
+- **Scope:** the redesign changes the look and layout, not the architecture.
+  Components (glyph grid, editor canvas, inspector, preview, panels) keep
+  their data flow, so features built before the redesign carry over.
+- Hebrew/RTL is a first-class concern of the design: RTL text inputs,
+  mixed-direction labels, and previews that read right to left.
+
 ## Bilingual / multilingual fonts (Phase 3, not urgent)
 
 **The end goal:** use the app to build bilingual and eventually multilingual
