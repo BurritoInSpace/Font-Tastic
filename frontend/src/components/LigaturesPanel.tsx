@@ -43,7 +43,7 @@ export function LigaturesPanel({ project, onChanged, onError }: Props) {
     setRules(rules.map((r, j) => (j === i ? { ...r, ...patch } : r)))
 
   return (
-    <div className="panel">
+    <div className="panel light">
       <h2>Ligatures</h2>
       <p className="muted">
         GSUB type 4: a sequence of glyphs becomes one. <code>liga</code> is always on; <code>dlig</code> and{' '}

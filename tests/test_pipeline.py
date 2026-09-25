@@ -93,7 +93,7 @@ def test_api(project):
     assert client.get("/api/glyphs/nope").status_code == 400
 
     r = client.post("/api/export")
-    assert r.status_code == 200 and Path(r.json()["path"]).exists()
+    assert r.status_code == 200 and all(Path(p).exists() for p in r.json()["paths"])
 
 
 def test_kerning_pair_in_reading_order(project):

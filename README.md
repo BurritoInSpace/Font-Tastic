@@ -91,7 +91,32 @@ MyFont/
   buttons in the **Project** tab. A restore snapshots first, so it can be
   undone too.
 
-`font.ufo` is a standard UFO with `features.fea` and GDEF categories always
+### Weights
+
+A project can hold several weights (Light, Regular, Bold…). The menu at the
+top left switches between them, and **+ New weight…** adds one. You pick its
+weight class (100–900), name, and which existing weight it starts as a copy
+of: its SVGs, anchors, widths and kerning. You then redraw its SVGs heavier
+or lighter in Illustrator. Editing copies also keeps the outlines
+point-compatible, which variable fonts will need later.
+
+- **Per weight:** outlines (SVGs), advance widths, anchor positions, kerning
+  values.
+- **Shared by all weights:** the glyph set, kerning groups, ligature rules,
+  family name and vertical metrics. Deleting or reassigning a glyph, or
+  changing a group, applies to every weight.
+- **Layout:** each weight gets its own folder and font data, e.g.
+  `glyphs/Bold/` and `masters/Bold.ufo`. A single-weight project keeps the
+  flat `glyphs/` + `font.ufo`; adding a second weight moves the current one
+  into `glyphs/Regular/` and `masters/Regular.ufo`.
+- The Illustrator watcher follows the weight you're editing. SVGs changed in
+  another weight's folder are picked up when you switch to it.
+- **Export OTF** writes every weight, e.g. `build/MyFont-Regular.otf` and
+  `build/MyFont-Bold.otf`.
+- Removing a weight (Project tab) moves its files into
+  `snapshots/removed-weights/` instead of deleting them.
+
+Each `.ufo` is a standard UFO with `features.fea` and GDEF categories always
 regenerated, so `fontmake -u font.ufo` works without the app.
 
 ### Naming SVGs
@@ -216,6 +241,14 @@ sides, and the HarfBuzz preview below shows the compiled result.
 - Deleting a group also removes the pairs that use it (a snapshot is taken
   first).
 - **↑ / ↓** step through the pair list, for going over pairs quickly.
+- **Gap markers** keep spacing consistent across pairs. Each letter of the
+  pair has one: a coloured band starting at that letter's ink edge facing
+  its partner, measured on the letter body (baseline to cap height, so a
+  lamed's ascender doesn't count). Set its **width** (your target gap) and
+  **shift** it left or right. The readout says how far the partner is from
+  it, it turns green when they touch, and **Fit** sets the kerning so they
+  touch exactly. Marker settings are shared by every pair and saved with the
+  project.
 
 ## Status
 
@@ -225,7 +258,6 @@ ligatures and alternates → compile → RTL preview, plus project handling
 trip (folder watcher, Edit in Illustrator).
 
 Next:
-- UI overhaul, designed in Figma (see the brief)
 - Porting logic from the existing FontForge script
 - Variable fonts (Phase 2)
 - Bilingual/multilingual fonts, Hebrew + Latin first (Phase 3, the end
@@ -237,3 +269,8 @@ Font-tastic is free software, licensed under the
 [GNU General Public License v3.0 or later](LICENSE). You may use, study,
 share and modify it; if you distribute modified versions, they must be
 released under the same license.
+
+The UI is set in [Google Sans](https://fonts.google.com/specimen/Google+Sans),
+bundled with the app (Latin and Hebrew subsets) so it works offline. It is
+licensed separately under the SIL Open Font License 1.1; see
+`frontend/public/fonts/OFL.txt`.

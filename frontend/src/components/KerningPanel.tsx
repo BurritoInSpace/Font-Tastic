@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, type Glyph, type Project } from '../api'
+import { api, type GapMarker, type Glyph, type Project } from '../api'
 import { charsToGlyphs } from '../glyphs'
+import { inkExtent } from '../ink'
 import {
   defaultGroupName,
   groupKey,
@@ -12,6 +13,7 @@ import {
   sideLabel,
   type Side,
 } from '../kerning'
+import { useConfirm } from './Confirm'
 import { CommitInput } from './GlyphEditor'
 
 interface Props {
@@ -41,6 +43,19 @@ export function KerningPanel({ project, onChanged, onError }: Props) {
   const [value, setValue] = useState(0)
   // One debounce timer per pair, so switching pairs never drops a pending save.
   const saveTimers = useRef(new Map<string, number>())
+  // Gap markers: shared by every pair and saved with the project, so spacing stays consistent.
+  const [gaps, setGaps] = useState<Record<'1' | '2', GapMarker>>(
+    () => project.settings.opticalGap ?? DEFAULT_GAPS,
+  )
+  const gapSave = useRef<number | undefined>(undefined)
+  const updateGap = (side: Side, patch: Partial<GapMarker>) => {
+    setGaps((g) => {
+      const next = { ...g, [side]: { ...g[`${side}`], ...patch } }
+      window.clearTimeout(gapSave.current)
+      gapSave.current = window.setTimeout(() => void api.saveSettings({ opticalGap: next }).catch(() => {}), 600)
+      return next
+    })
+  }
   // Set when a row in the pair list is clicked, so its level is shown rather than the most specific one.
   const requestedLevels = useRef<Levels | null>(null)
 
@@ -125,6 +140,33 @@ export function KerningPanel({ project, onChanged, onError }: Props) {
   const ctx = charsToGlyphs(project, context) ?? []
   const sequence = [...ctx, first, second, ...ctx].map((n) => byName.get(n)).filter((g): g is Glyph => !!g)
   const kernOf = (a: string, b: string) => resolveKern(project, live, a, b).value
+  const placed = layoutRun(sequence, kernOf, ctx.length)
+
+  // Gap markers sit at each letter's ink edge facing the other, measured on
+  // the letter body (baseline to cap height), and extend into the gap.
+  const band: [number, number] = [0, project.info.capHeight]
+  const [leftHot, rightHot] = placed.filter((p) => p.hot) // visual order: left-hand letter, right-hand letter
+  const markers: Marker[] = []
+  if (leftHot && rightHot) {
+    const inkL = inkExtent(leftHot.glyph.path, ...band)
+    const inkR = inkExtent(rightHot.glyph.path, ...band)
+    if (inkL && inkR) {
+      const leftEdge = leftHot.x + inkL.xMax // right edge of the left-hand letter's ink
+      const rightEdge = rightHot.x + inkR.xMin // left edge of the right-hand letter's ink
+      const g1 = gaps['1']
+      const g2 = gaps['2']
+      if (g1.on) {
+        const x = rightEdge - g1.width + g1.offset
+        markers.push({ side: 1, x, width: g1.width, distance: x - leftEdge })
+      }
+      if (g2.on) {
+        const x = leftEdge + g2.offset
+        markers.push({ side: 2, x, width: g2.width, distance: rightEdge - (x + g2.width) })
+      }
+    }
+  }
+  // Fit: change the kern by exactly the distance, so the partner meets the marker.
+  const fit = (m: Marker) => change(Math.round(value - m.distance))
 
   const covers = membersOf(project, k1).length * membersOf(project, k2).length
   // Which stored pair actually decides this letter pair, if not the one being edited:
@@ -176,9 +218,11 @@ export function KerningPanel({ project, onChanged, onError }: Props) {
   }, [editKey])
 
   return (
-    <div className="panel kerning">
+    <div className="kerning-layout">
+      <div className="kerning-main">
+      <div className="card light">
       <h2>Kerning</h2>
-      <p className="muted">
+      <p className="muted small">
         Type a pair the way you write it. For <span dir="rtl">בת</span> the first letter is bet, on the right.
         Negative values pull the pair together. Kern whole groups of similar letters at once, then add exceptions
         for single pairs that need their own value.
@@ -196,7 +240,7 @@ export function KerningPanel({ project, onChanged, onError }: Props) {
         <input dir="auto" value={context} placeholder="context letters" onChange={(e) => setContext(e.target.value)} />
       </div>
 
-      <PairView project={project} sequence={sequence} kernOf={kernOf} firstIndex={ctx.length} />
+      <PairView project={project} placed={placed} markers={markers} band={band} />
 
       <div className="kern-caption">
         Editing <strong dir="ltr">{sideLabel(byName, k1)} + {sideLabel(byName, k2)}</strong>
@@ -223,6 +267,9 @@ export function KerningPanel({ project, onChanged, onError }: Props) {
         <CommitInput value={String(value)} numeric onCommit={(v) => change(Math.round(Number(v)))} />
         <button disabled={value === 0 && !saved.has(editKey)} onClick={() => change(0)}>Remove</button>
       </div>
+      </div>
+
+      <div className="card light">
 
       <h4>Pairs <span className="muted">{project.kerning.length}</span>
         <span className="muted hint-inline">↑ / ↓ step through the list</span></h4>
@@ -258,7 +305,25 @@ export function KerningPanel({ project, onChanged, onError }: Props) {
         </table>
       )}
 
-      <KernGroups project={project} glyphs={glyphs} byName={byName} onChanged={onChanged} onError={onError} />
+      </div>
+      </div>
+
+      <div className="kerning-groups">
+        <KernGroups project={project} glyphs={glyphs} byName={byName} onChanged={onChanged} onError={onError} />
+      </div>
+
+      <aside className="side-panel light">
+        <h4>Gap markers</h4>
+        <p className="hint">
+          A band from each letter's edge into the gap, to keep spacing consistent from pair to pair. Set its width to
+          your target gap; Fit kerns the pair so the other letter just touches it.
+        </p>
+        {([1, 2] as Side[]).map((side) => (
+          <GapControl key={side} side={side} label={side === 1 ? 'Right-hand letter' : 'Left-hand letter'}
+            gap={gaps[`${side}`]} marker={markers.find((m) => m.side === side)}
+            onChange={(p) => updateGap(side, p)} onFit={fit} />
+        ))}
+      </aside>
     </div>
   )
 }
@@ -321,6 +386,7 @@ function KernGroups({ project, glyphs, byName, onChanged, onError }: {
   onChanged: () => void
   onError: (msg: string) => void
 }) {
+  const confirm = useConfirm()
   const run = async (action: () => Promise<unknown>) => {
     try {
       await action()
@@ -332,15 +398,16 @@ function KernGroups({ project, glyphs, byName, onChanged, onError }: {
 
   return (
     <>
-      <h4>Groups</h4>
-      <p className="muted small">
-        A letter can be in one group of each kind. Adding it to a group moves it out of any other group of that kind.
-      </p>
-      <div className="group-columns">
+      <div className="card light">
+        <h4>Kerning groups</h4>
+        <p className="hint">
+          A letter can be in one group of each kind. Adding it to a group moves it out of any other group of that kind.
+        </p>
+      </div>
         {([1, 2] as Side[]).map((side) => {
           const groups = Object.entries(project.kernGroups[`${side}`])
           return (
-            <section key={side} className="group-column">
+            <section key={side} className="card light">
               <h5>{SIDE_INFO[side].title}</h5>
               <p className="muted small">{SIDE_INFO[side].hint}</p>
               {groups.length === 0 && <p className="muted small">None yet.</p>}
@@ -355,8 +422,15 @@ function KernGroups({ project, glyphs, byName, onChanged, onError }: {
                       <span className="muted small">{uses} pair{uses === 1 ? '' : 's'}</span>
                       <span className="spacer" />
                       <button className="icon" title="Delete group" onClick={() => {
-                        if (uses && !window.confirm(`Delete @${name}? Its ${uses} kerning pair${uses === 1 ? '' : 's'} will be removed too (a snapshot is taken first).`)) return
-                        void run(() => api.deleteKernGroup(side, name))
+                        void (async () => {
+                          if (uses && !(await confirm({
+                            title: `Delete @${name}?`,
+                            body: <p>Its {uses} kerning pair{uses === 1 ? '' : 's'} will be removed too. A snapshot is taken first.</p>,
+                            confirmLabel: 'Delete group',
+                            danger: true,
+                          }))) return
+                          await run(() => api.deleteKernGroup(side, name))
+                        })()
                       }}>×</button>
                     </div>
                     <div className="members" dir="rtl">
@@ -377,7 +451,6 @@ function KernGroups({ project, glyphs, byName, onChanged, onError }: {
             </section>
           )
         })}
-      </div>
     </>
   )
 }
@@ -417,17 +490,30 @@ function NewGroup({ glyphs, onCreate }: { glyphs: Glyph[]; onCreate: (name: stri
   )
 }
 
-/** Draws a logical-order glyph sequence right to left, applying kerning between neighbours. */
-function PairView({ project, sequence, kernOf, firstIndex }: {
-  project: Project
-  sequence: Glyph[]
-  kernOf: (a: string, b: string) => number
-  /** logical index of the pair's first glyph; the pair is drawn highlighted */
-  firstIndex: number
-}) {
-  const { ascender, descender } = project.info
+const DEFAULT_GAPS: Record<'1' | '2', GapMarker> = {
+  1: { on: false, width: 80, offset: 0 },
+  2: { on: false, width: 80, offset: 0 },
+}
+
+interface Placed {
+  glyph: Glyph
+  x: number
+  /** part of the pair being kerned (vs. context letters) */
+  hot: boolean
+}
+
+interface Marker {
+  side: Side
+  x: number
+  width: number
+  /** units between the marker and the partner's ink: > 0 a gap remains, < 0 they overlap */
+  distance: number
+}
+
+/** Lay a logical-order glyph sequence out right to left, applying kerning between neighbours. */
+function layoutRun(sequence: Glyph[], kernOf: (a: string, b: string) => number, firstIndex: number): Placed[] {
   const visual = [...sequence].reverse()
-  const placed: { glyph: Glyph; x: number; hot: boolean }[] = []
+  const placed: Placed[] = []
   let x = 0
   visual.forEach((g, j) => {
     if (j > 0) x += kernOf(g.name, visual[j - 1].name) // logical pair is (right, left)
@@ -435,6 +521,69 @@ function PairView({ project, sequence, kernOf, firstIndex }: {
     placed.push({ glyph: g, x, hot: logicalIndex === firstIndex || logicalIndex === firstIndex + 1 })
     x += g.width
   })
+  return placed
+}
+
+const TOUCHING = 1 // units within which a marker counts as met
+
+function GapControl({ side, label, gap, marker, onChange, onFit }: {
+  side: Side
+  label: string
+  gap: GapMarker
+  marker: Marker | undefined
+  onChange: (p: Partial<GapMarker>) => void
+  onFit: (m: Marker) => void
+}) {
+  const d = marker ? Math.round(marker.distance) : null
+  return (
+    <div className={`gap-control side-${side}${gap.on ? ' on' : ''}`} dir="ltr">
+      <label className="gap-toggle">
+        <input type="checkbox" checked={gap.on} onChange={(e) => onChange({ on: e.target.checked })} />
+        <span className="gap-swatch" /> Gap marker <span className="muted small">{label}</span>
+      </label>
+      {gap.on && (
+        <>
+          <div className="row">
+            <span className="muted small">width</span>
+            <CommitInput value={String(gap.width)} numeric
+              onCommit={(v) => onChange({ width: Math.max(0, Math.round(Number(v))) })} />
+            <span className="muted small">shift</span>
+            <button className="nudge" title="Shift left (Shift-click: 1 unit)"
+              onClick={(e) => onChange({ offset: gap.offset - (e.shiftKey ? 1 : 5) })}>←</button>
+            <CommitInput value={String(gap.offset)} numeric onCommit={(v) => onChange({ offset: Math.round(Number(v)) })} />
+            <button className="nudge" title="Shift right (Shift-click: 1 unit)"
+              onClick={(e) => onChange({ offset: gap.offset + (e.shiftKey ? 1 : 5) })}>→</button>
+          </div>
+          <div className="row">
+            {d === null ? (
+              <span className="muted small">No ink in the letter body to measure from</span>
+            ) : Math.abs(d) <= TOUCHING ? (
+              <span className="gap-ok small">Touching the marker</span>
+            ) : d > 0 ? (
+              <span className="small">{d} units of extra space</span>
+            ) : (
+              <span className="warn-text small">{-d} units into the marker</span>
+            )}
+            <span className="spacer" />
+            <button disabled={!marker || Math.abs(d ?? 0) <= TOUCHING} onClick={() => marker && onFit(marker)}
+              title="Set the kerning so the other letter just touches the marker">Fit</button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Draws the laid-out pair (and context), with gap markers behind the glyphs. */
+function PairView({ project, placed, markers, band }: {
+  project: Project
+  placed: Placed[]
+  markers: Marker[]
+  band: [number, number]
+}) {
+  const { ascender, descender } = project.info
+  const last = placed[placed.length - 1]
+  const x = last ? last.x + last.glyph.width : 0
   const pad = 120
   const hot = placed.filter((p) => p.hot)
   const gapX = hot.length === 2 ? hot[0].x + hot[0].glyph.width : null
@@ -442,6 +591,10 @@ function PairView({ project, sequence, kernOf, firstIndex }: {
   return (
     <div className="pair-view">
       <svg viewBox={`${-pad} ${-ascender - 40} ${Math.max(x, 1) + pad * 2} ${ascender - descender + 80}`}>
+        {markers.map((m) => (
+          <rect key={m.side} className={`gap-marker side-${m.side}${Math.abs(m.distance) <= TOUCHING ? ' touching' : ''}`}
+            x={m.x} y={-band[1]} width={Math.max(m.width, 0)} height={band[1] - band[0]} />
+        ))}
         <line className="metric baseline" x1={-pad} x2={x + pad} y1={0} y2={0} />
         {gapX !== null && <line className="kern-seam" x1={gapX} x2={gapX} y1={-ascender} y2={-descender} />}
         {placed.map((p, i) => (

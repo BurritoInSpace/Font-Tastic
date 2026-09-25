@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type Anchor, type Glyph, type Project } from '../api'
 import { basesFor, glyphLabel, marksFor, STANDARD_ANCHORS } from '../glyphs'
+import { useConfirm } from './Confirm'
 import { ReassignDialog } from './ReassignDialog'
 
 interface Props {
@@ -19,6 +20,7 @@ const PAD = 160
 
 export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onOpenGlyph, onProject }: Props) {
   const [reassigning, setReassigning] = useState(false)
+  const confirm = useConfirm()
   const [anchors, setAnchors] = useState<Anchor[]>(glyph.anchors)
   const [active, setActive] = useState<number | null>(null)
   const [showGhosts, setShowGhosts] = useState(true)
@@ -193,11 +195,19 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onO
       groups && `${groups} kerning group membership${groups === 1 ? '' : 's'}`,
       rules && `${rules} ligature rule${rules === 1 ? '' : 's'}`,
     ].filter(Boolean)
-    const msg = `Delete ${glyph.char ? glyph.char + ' ' : ''}${glyph.name}` +
-      `${glyph.source && !glyph.sourceMissing ? ` and its file ${glyph.source}` : ''}?` +
-      (extras.length ? `\n\nThis also removes ${extras.join(', ')}.` : '') +
-      '\n\nA snapshot is taken first, so it can be restored from the Project tab.'
-    if (!window.confirm(msg)) return
+    const ok = await confirm({
+      title: `Delete ${glyph.char ? glyph.char + ' ' : ''}${glyph.name}?`,
+      body: (
+        <>
+          {glyph.source && !glyph.sourceMissing && <p>Its file <code>{glyph.source}</code> is deleted too.</p>}
+          {extras.length > 0 && <p>This also removes {extras.join(', ')}.</p>}
+          <p>A snapshot is taken first, so it can be restored from the Project tab.</p>
+        </>
+      ),
+      confirmLabel: 'Delete glyph',
+      danger: true,
+    })
+    if (!ok) return
     try {
       const res = await api.deleteGlyph(glyph.name)
       onProject?.(res.project)
@@ -265,7 +275,7 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onO
         </svg>
       </div>
 
-      <aside className="inspector">
+      <aside className="inspector side-panel light">
         <header>
           <div className="big-char">{glyph.char}</div>
           <div>

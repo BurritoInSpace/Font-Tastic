@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, ApiError, nativeBridge, type ImportReport, type Project, type RecentProject } from '../api'
+import { GITHUB_MARK, GITHUB_MARK_VIEWBOX, GITHUB_URL, logo, wordmark } from '../assets'
 
 interface Props {
   onOpened: (project: Project, report: ImportReport) => void
@@ -17,7 +18,7 @@ function defaultLocation(recent: RecentProject[]): string {
 }
 
 export function HomeScreen({ onOpened, message }: Props) {
-  const [recent, setRecent] = useState<RecentProject[]>([])
+  const [recent, setRecent] = useState<RecentProject[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [convertPath, setConvertPath] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -25,7 +26,7 @@ export function HomeScreen({ onOpened, message }: Props) {
   const bridge = nativeBridge()
 
   useEffect(() => {
-    api.recent().then((r) => setRecent(r.recent)).catch(() => {})
+    api.recent().then((r) => setRecent(r.recent)).catch(() => setRecent([]))
   }, [])
 
   const run = async (action: () => Promise<Opened>, pathForConversion?: string) => {
@@ -54,64 +55,105 @@ export function HomeScreen({ onOpened, message }: Props) {
 
   return (
     <div className="home">
-      <div className="home-inner">
-        <h1>Font-tastic</h1>
-        <p className="muted">Illustrator draws the glyphs; Font-tastic does the typography.</p>
+      <header className="home-header">
+        <img className="logo" src={logo} alt="" />
+        <img className="wordmark" src={wordmark} alt="Font-tastic" />
+        <a className="github" href={GITHUB_URL} target="_blank" rel="noreferrer" title="Font-tastic on GitHub">
+          <svg viewBox={GITHUB_MARK_VIEWBOX} aria-hidden="true"><path d={GITHUB_MARK} /></svg>
+        </a>
+      </header>
 
-        <div className="row home-actions">
-          <button className="primary" onClick={() => setCreating(true)} disabled={busy}>New project…</button>
-          <button onClick={() => void pickAndOpen()} disabled={busy}>Open project…</button>
-        </div>
-
-        {creating && (
-          <NewProjectForm
-            initialLocation={defaultLocation(recent)}
-            busy={busy}
-            onCancel={() => setCreating(false)}
-            onCreate={(parent, name) => void run(() => api.newProject(parent, name))}
-          />
-        )}
-
-        {convertPath && (
-          <div className="notice">
-            <p>
-              <strong>{convertPath}</strong> uses the old layout (<code>glyphs/</code> + <code>font.ufo/</code>) without a
-              project file. Converting adds a <code>.fonttastic</code> file; nothing else in the folder changes.
-            </p>
-            <div className="row">
-              <button className="primary" disabled={busy}
-                onClick={() => { const p = convertPath; setConvertPath(null); void run(() => api.convert(p)) }}>
-                Convert and open
-              </button>
-              <button onClick={() => setConvertPath(null)}>Cancel</button>
+      <div className="home-body">
+        <section aria-label="Recent projects">
+          {recent === null ? null : recent.length === 0 ? (
+            <div className="home-empty">
+              No projects yet.<br />Make a new project or open an existing one.
             </div>
+          ) : (
+            <ul className="recent">
+              {recent.map((r) => (
+                <li key={r.path} className={r.exists ? '' : 'missing'}>
+                  <Thumbnail project={r} />
+                  <button className="recent-open" disabled={!r.exists || busy} onClick={() => open(r.path)}
+                    title={r.exists ? r.path : 'Moved or deleted'}>
+                    <span className="recent-title">
+                      <span className="recent-name">{r.name}</span>
+                      <span className="recent-date">{formatDate(r.opened)}</span>
+                    </span>
+                    <span className="recent-path">{r.exists ? r.path : `Missing: ${r.path}`}</span>
+                  </button>
+                  <button className="icon recent-remove" title="Remove from this list"
+                    onClick={() => api.removeRecent(r.path).then((x) => setRecent(x.recent))}>✖</button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <div className="home-divider" aria-hidden="true" />
+
+        <section className="home-actions">
+          <div className="buttons">
+            <button className="primary" onClick={() => setCreating(true)} disabled={busy}>New Project</button>
+            <button className="secondary" onClick={() => void pickAndOpen()} disabled={busy}>Open Project</button>
           </div>
-        )}
 
-        {(error || message) && (
-          <p className={error || message?.error ? 'error' : 'muted'}>{error ?? message?.text}</p>
-        )}
+          {creating && (
+            <NewProjectForm
+              initialLocation={defaultLocation(recent ?? [])}
+              busy={busy}
+              onCancel={() => setCreating(false)}
+              onCreate={(parent, name) => void run(() => api.newProject(parent, name))}
+            />
+          )}
 
-        <h4>Recent projects</h4>
-        {recent.length === 0 ? (
-          <p className="muted small">Nothing yet. Create a project, or open an existing one.</p>
-        ) : (
-          <ul className="recent">
-            {recent.map((r) => (
-              <li key={r.path} className={r.exists ? '' : 'missing'}>
-                <button className="recent-open" disabled={!r.exists || busy} onClick={() => open(r.path)}
-                  title={r.exists ? r.path : 'Moved or deleted'}>
-                  <span className="recent-name">{r.name}</span>
-                  <span className="muted small recent-path">{r.exists ? r.path : `Missing: ${r.path}`}</span>
+          {convertPath && (
+            <div className="notice">
+              <p>
+                <strong>{convertPath}</strong> uses the old layout (<code>glyphs/</code> + <code>font.ufo/</code>) without
+                a project file. Converting adds a <code>.fonttastic</code> file; nothing else in the folder changes.
+              </p>
+              <div className="row">
+                <button className="primary" disabled={busy}
+                  onClick={() => { const p = convertPath; setConvertPath(null); void run(() => api.convert(p)) }}>
+                  Convert and open
                 </button>
-                <span className="muted small">{formatDate(r.opened)}</span>
-                <button className="icon" title="Remove from list"
-                  onClick={() => api.removeRecent(r.path).then((x) => setRecent(x.recent))}>×</button>
-              </li>
-            ))}
-          </ul>
-        )}
+                <button className="secondary" onClick={() => setConvertPath(null)}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {(error || message) && (
+            <p className={error || message?.error ? 'error' : 'home-note'}>{error ?? message?.text}</p>
+          )}
+        </section>
       </div>
+    </div>
+  )
+}
+
+/** A letter from the project's own font, so each project is recognisable. */
+function Thumbnail({ project }: { project: RecentProject }) {
+  const [preview, setPreview] = useState<{ path: string; bounds: [number, number, number, number] | null } | null>(null)
+  useEffect(() => {
+    if (!project.exists) return
+    let cancelled = false
+    api.recentPreview(project.path).then((r) => !cancelled && setPreview(r.preview)).catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [project.path, project.exists])
+
+  if (!preview?.bounds) return <div className="recent-thumb" aria-hidden="true" />
+  const [x0, y0, x1, y1] = preview.bounds
+  const size = Math.max(x1 - x0, y1 - y0) * 1.15
+  const cx = (x0 + x1) / 2
+  const cy = (y0 + y1) / 2
+  return (
+    <div className="recent-thumb" aria-hidden="true">
+      <svg viewBox={`${cx - size / 2} ${-cy - size / 2} ${size} ${size}`}>
+        <path d={preview.path} transform="scale(1,-1)" />
+      </svg>
     </div>
   )
 }
@@ -129,30 +171,27 @@ function NewProjectForm({ initialLocation, busy, onCancel, onCreate }: {
   const target = location && name.trim() ? `${location.replace(/[\\/]+$/, '')}${sep}${name.trim()}` : null
 
   return (
-    <form className="notice new-project" onSubmit={(e) => { e.preventDefault(); if (target) onCreate(location, name.trim()) }}>
-      <label>
-        <span>Name</span>
-        <input autoFocus value={name} placeholder="e.g. Shalom Sans" onChange={(e) => setName(e.target.value)} />
-      </label>
-      <label>
-        <span>Location</span>
-        <div className="row">
-          <input className="grow" value={location} placeholder="Folder to create the project in"
-            onChange={(e) => setLocation(e.target.value)} />
-          {bridge && (
-            <button type="button" onClick={async () => { const p = await bridge.pick_folder(); if (p) setLocation(p) }}>
-              Choose…
-            </button>
-          )}
-        </div>
-      </label>
-      <p className="muted small">
-        {target ? <>Creates <code>{target}</code> with the project file, <code>glyphs/</code> for your SVGs and the font data.</>
+    <form className="home-form" onSubmit={(e) => { e.preventDefault(); if (target) onCreate(location, name.trim()) }}>
+      <label htmlFor="project-name">Project Name</label>
+      <input id="project-name" autoFocus value={name} placeholder="e.g. Shalom Sans" onChange={(e) => setName(e.target.value)} />
+      <label htmlFor="project-location">Location</label>
+      <div className="row">
+        <input id="project-location" className="grow" value={location} placeholder="Folder to create the project in"
+          onChange={(e) => setLocation(e.target.value)} />
+        {bridge && (
+          <button type="button" className="primary choose"
+            onClick={async () => { const p = await bridge.pick_folder(); if (p) setLocation(p) }}>
+            Choose
+          </button>
+        )}
+      </div>
+      <p className="home-note">
+        {target ? <>Creates <code>{target}</code> with the project file, a <code>glyphs</code> folder for your SVGs, and the font data.</>
           : 'Pick a name and a location.'}
       </p>
-      <div className="row">
-        <button className="primary" type="submit" disabled={!target || busy}>Create project</button>
-        <button type="button" onClick={onCancel}>Cancel</button>
+      <div className="buttons">
+        <button className="primary" type="submit" disabled={!target || busy}>Create Project</button>
+        <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
       </div>
     </form>
   )

@@ -48,12 +48,38 @@ export interface KernPair {
   value: number
 }
 
+/** Kerning gap marker for one side of a pair ("1" = right-hand letter, "2" = left-hand). */
+export interface GapMarker {
+  on: boolean
+  /** the target gap, in font units */
+  width: number
+  /** shift of the marker, font units, positive = to the right */
+  offset: number
+}
+
 export interface ProjectSettings {
   previewText?: string
+  /** height of the preview strip, px */
+  previewHeight?: number
+  opticalGap?: Record<'1' | '2', GapMarker>
+}
+
+export interface WeightInfo {
+  name: string
+  /** OpenType weight class, 1-1000 */
+  weight: number
+  /** SVG folder, relative to the project */
+  glyphs: string
+  active: boolean
 }
 
 export interface Project {
   root: string
+  /** the weight being edited */
+  weight: string
+  weights: WeightInfo[]
+  /** single weight still directly in glyphs/ + font.ufo (moves to glyphs/<Weight>/ when a second is added) */
+  flatLayout: boolean
   /** the .fonttastic file */
   file: string
   name: string
@@ -159,6 +185,9 @@ export const api = {
   close: () => call<{ project: null }>('POST', '/api/project/close'),
   saveSettings: (values: ProjectSettings) => call<{ settings: ProjectSettings }>('PUT', '/api/project/settings', values),
   recent: () => call<{ recent: RecentProject[] }>('GET', '/api/recent'),
+  recentPreview: (path: string) =>
+    call<{ preview: { name: string; path: string; bounds: [number, number, number, number] | null } | null }>(
+      'GET', `/api/recent/preview?path=${encodeURIComponent(path)}`),
   removeRecent: (path: string) => call<{ recent: RecentProject[] }>('POST', '/api/recent/remove', { path }),
   snapshots: () => call<{ snapshots: Snapshot[] }>('GET', '/api/snapshots'),
   restore: (id: string) =>
@@ -193,7 +222,13 @@ export const api = {
     call<Project>('PUT', '/api/kerning/groups', { side, name, glyphs, renameFrom }),
   deleteKernGroup: (side: 1 | 2, name: string) =>
     call<Project>('POST', '/api/kerning/groups/delete', { side, name }),
-  exportOtf: () => call<{ path: string; bytes: number }>('POST', '/api/export'),
+  exportOtf: () => call<{ paths: string[]; bytes: number }>('POST', '/api/export'),
+  addWeight: (name: string, weight: number, copyFrom: string) =>
+    call<{ project: Project; import: ImportReport }>('POST', '/api/weights', { name, weight, copyFrom }),
+  switchWeight: (name: string) =>
+    call<{ project: Project; import: ImportReport }>('POST', '/api/weights/switch', { name }),
+  deleteWeight: (name: string) =>
+    call<{ project: Project; import: ImportReport }>('POST', '/api/weights/delete', { name }),
   fontBinary: async (): Promise<ArrayBuffer> => {
     const res = await fetch('/api/font.otf')
     if (!res.ok) {

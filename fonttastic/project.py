@@ -1,11 +1,20 @@
 """A Font-tastic project: one self-contained folder, marked by a project file.
 
     MyFont/
-      MyFont.fonttastic   project file (JSON): name, settings, relative paths
+      MyFont.fonttastic   project file (JSON): name, weights, settings, relative paths
       glyphs/             one SVG per glyph, named by Unicode slot (uni05D0.svg)
       font.ufo/           outlines (imported) + metrics, anchors, kerning, ligatures
       build/              compiled fonts
       snapshots/          copies of font.ufo taken before destructive operations
+
+A project with several weights keeps each in its own folder and UFO:
+
+      glyphs/Regular/  glyphs/Bold/        one SVG folder per weight
+      masters/Regular.ufo  masters/Bold.ufo
+
+Per weight: outlines, widths, anchor positions, kerning values. Shared by all
+weights (kept identical in every UFO): the glyph set, kerning groups,
+ligature rules, family name and vertical metrics.
 
 All paths in the project file are relative to it, so the folder can be moved,
 zipped, synced or put under git.
@@ -22,6 +31,8 @@ import json
 import re
 import shutil
 import threading
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -43,8 +54,14 @@ DEFAULT_INFO = dict(unitsPerEm=1000, ascender=800, descender=-200, capHeight=700
 
 PROJECT_SUFFIX = ".fonttastic"
 PROJECT_FORMAT = "fonttastic-project"
-PROJECT_VERSION = 1
+PROJECT_VERSION = 2  # 2: weights
 DEFAULT_PATHS = {"glyphs": "glyphs", "font": "font.ufo", "build": "build", "snapshots": "snapshots"}
+SHARED_INFO = ("familyName", "unitsPerEm", "ascender", "descender", "capHeight", "xHeight")
+
+# OpenType weight classes and their usual names.
+WEIGHT_NAMES = {100: "Thin", 200: "ExtraLight", 300: "Light", 400: "Regular", 500: "Medium",
+                600: "SemiBold", 700: "Bold", 800: "ExtraBold", 900: "Black"}
+WEIGHT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")  # also a folder and file name
 KEEP_SNAPSHOTS = 30
 
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.]*$")
@@ -54,6 +71,14 @@ KERN_SIDES = (1, 2)
 
 class ProjectError(Exception):
     code = "error"
+
+
+@dataclass
+class Weight:
+    name: str  # style name, e.g. "Bold"; also its folder / UFO name
+    weight: int  # OpenType usWeightClass, 1-1000
+    glyphs: str  # SVG folder, relative to the project file
+    font: str  # UFO, relative to the project file
 
 
 class NeedsConversion(ProjectError):
@@ -78,15 +103,27 @@ def _file_name(name: str) -> str:
     return (cleaned or "Untitled") + PROJECT_SUFFIX
 
 
-def _write_project_file(path: Path, name: str, settings: dict | None = None):
+def _write_project_file(path: Path, name: str, weights: list[Weight], settings: dict | None = None):
     data = {
         "format": PROJECT_FORMAT,
         "version": PROJECT_VERSION,
         "name": name,
-        "paths": dict(DEFAULT_PATHS),
+        "paths": {"build": DEFAULT_PATHS["build"], "snapshots": DEFAULT_PATHS["snapshots"]},
+        "weights": [asdict(w) for w in weights],
         "settings": settings or {},
     }
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _single_weight(root: Path, glyphs: str, font: str) -> Weight:
+    """The one weight of a flat (single-weight or version-1) project."""
+    name, weight = "Regular", 400
+    ufo = root / font
+    if ufo.is_dir():
+        info = ufoLib2.Font.open(ufo, lazy=True).info
+        name = info.styleName if info.styleName and WEIGHT_NAME.match(info.styleName) else name
+        weight = info.openTypeOS2WeightClass or weight
+    return Weight(name, weight, glyphs, font)
 
 
 class Project:
@@ -119,18 +156,164 @@ class Project:
         self.name = data.get("name") or path.stem
         self.settings: dict = data.get("settings", {})
         self._paths = {**DEFAULT_PATHS, **data.get("paths", {})}
-        self.glyphs_dir = (self.root / self._paths["glyphs"]).resolve()
-        self.ufo_path = self.root / self._paths["font"]
         self.build_dir = self.root / self._paths["build"]
         self.snapshots_dir = self.root / self._paths["snapshots"]
         self.lock = threading.RLock()
         self.revision = 0
 
+        if data.get("weights"):
+            self.weights = [Weight(**w) for w in data["weights"]]
+        else:  # version 1: one weight in glyphs/ + font.ufo
+            self.weights = [_single_weight(self.root, self._paths["glyphs"], self._paths["font"])]
+        current = self.settings.get("currentWeight")
+        self._activate(next((w for w in self.weights if w.name == current), self.weights[0]))
+
+    # -- weights ---------------------------------------------------------------
+
+    def _activate(self, weight: Weight):
+        """Make ``weight`` the one that self.font / glyphs_dir / ufo_path refer to."""
+        self.active = weight
+        self.glyphs_dir = (self.root / weight.glyphs).resolve()
+        self.ufo_path = self.root / weight.font
         self.glyphs_dir.mkdir(parents=True, exist_ok=True)
         if self.ufo_path.exists():
             self.font = ufoLib2.Font.open(self.ufo_path, lazy=False)
         else:
-            self.font = self._new_font()
+            self.font = self._new_font(weight)
+
+    @contextmanager
+    def _in_weight(self, weight: Weight):
+        """Temporarily work on another weight (its font, SVG folder and UFO)."""
+        if weight is self.active:
+            yield
+            return
+        saved = (self.active, self.font, self.glyphs_dir, self.ufo_path)
+        try:
+            self._activate(weight)
+            yield
+        finally:
+            self.active, self.font, self.glyphs_dir, self.ufo_path = saved
+
+    def _each_weight(self, fn, only_with: str | None = None):
+        """Run ``fn()`` in every weight, committing each; the active weight goes
+        last and its result is returned. ``only_with`` skips weights that don't
+        have that glyph."""
+        result = None
+        for w in [w for w in self.weights if w is not self.active] + [self.active]:
+            with self._in_weight(w):
+                if only_with is not None and only_with not in self.font:
+                    continue
+                r = fn()
+                self._commit()
+                if w is self.active:
+                    result = r
+        return result
+
+    def weight_by_name(self, name: str) -> Weight:
+        for w in self.weights:
+            if w.name == name:
+                return w
+        raise ProjectError(f"No weight named {name!r}")
+
+    @property
+    def flat_layout(self) -> bool:
+        """True while the project has its single weight directly in glyphs/ + font.ufo."""
+        return len(self.weights) == 1 and self.weights[0].glyphs == DEFAULT_PATHS["glyphs"]
+
+    def _save_project_file(self):
+        _write_project_file(self.file, self.name, self.weights, self.settings)
+
+    def switch_weight(self, name: str):
+        with self.lock:
+            self._activate(self.weight_by_name(name))
+            self.settings["currentWeight"] = name
+            self._save_project_file()
+            self.revision += 1
+
+    def add_weight(self, name: str, weight_class: int, copy_from: str) -> Weight:
+        """Add a weight as a copy of an existing one (its SVGs, anchors, widths
+        and kerning), to be redrawn heavier or lighter. The first extra weight
+        moves the current one into the folder-per-weight layout."""
+        if not WEIGHT_NAME.match(name):
+            raise ProjectError(f"{name!r}: use letters, digits, - or _ (it's also a folder name)")
+        if not isinstance(weight_class, int) or not 1 <= weight_class <= 1000:
+            raise ProjectError("The weight must be between 1 and 1000")
+        with self.lock:
+            if any(w.name.lower() == name.lower() for w in self.weights):
+                raise ProjectError(f"There is already a weight called {name}")
+            if any(w.weight == weight_class for w in self.weights):
+                raise ProjectError(f"There is already a weight at {weight_class}")
+            source = self.weight_by_name(copy_from)
+            if self.flat_layout:
+                self._move_to_folders()
+            new = Weight(name, weight_class, f"glyphs/{name}", f"masters/{name}.ufo")
+            glyphs_to, ufo_to = self.root / new.glyphs, self.root / new.font
+            if (glyphs_to.exists() and any(glyphs_to.iterdir())) or ufo_to.exists():
+                raise ProjectError(f"{new.glyphs} or {new.font} already exists")
+            with self._in_weight(source):
+                self._commit()  # make sure the copy starts from what's on screen
+                glyphs_to.mkdir(parents=True, exist_ok=True)
+                for svg in self.svg_files():
+                    shutil.copy2(svg, glyphs_to / svg.name)  # keeps mtimes, so nothing looks changed
+                ufo_to.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(self.ufo_path, ufo_to)
+            font = ufoLib2.Font.open(ufo_to, lazy=False)
+            font.info.styleName = name
+            font.info.openTypeOS2WeightClass = weight_class
+            font.save(ufo_to, overwrite=True)
+            self.weights.append(new)
+            self.weights.sort(key=lambda w: w.weight)
+            self.switch_weight(name)
+            return new
+
+    def _move_to_folders(self):
+        """glyphs/*.svg + font.ufo  ->  glyphs/<Weight>/*.svg + masters/<Weight>.ufo"""
+        w = self.weights[0]
+        glyphs_to = self.root / "glyphs" / w.name
+        ufo_to = self.root / "masters" / f"{w.name}.ufo"
+        with self._in_weight(w):
+            glyphs_to.mkdir(parents=True, exist_ok=True)
+            for svg in self.svg_files():
+                svg.rename(glyphs_to / svg.name)
+            if self.ufo_path.exists():
+                ufo_to.parent.mkdir(parents=True, exist_ok=True)
+                self.ufo_path.rename(ufo_to)
+        w.glyphs, w.font = f"glyphs/{w.name}", f"masters/{w.name}.ufo"
+        if w is self.active:
+            self.glyphs_dir, self.ufo_path = glyphs_to.resolve(), ufo_to
+        self._save_project_file()
+
+    def delete_weight(self, name: str):
+        """Remove a weight. Its SVG folder and UFO are moved into
+        snapshots/removed-weights/, not destroyed."""
+        with self.lock:
+            weight = self.weight_by_name(name)
+            if len(self.weights) == 1:
+                raise ProjectError("A project needs at least one weight")
+            keep = self.snapshots_dir / "removed-weights" / f"{name}-{datetime.now():%Y%m%d-%H%M%S}"
+            keep.mkdir(parents=True)
+            for rel in (weight.glyphs, weight.font):
+                if (self.root / rel).exists():
+                    shutil.move(str(self.root / rel), str(keep / Path(rel).name))
+            self.weights.remove(weight)
+            if weight is self.active:
+                self.switch_weight(self.weights[0].name)
+            else:
+                self._save_project_file()
+                self.revision += 1
+
+    def export_all(self, compile_fn) -> list[Path]:
+        """Compile every weight to build/<Family>-<Style>.otf."""
+        with self.lock:
+            self.build_dir.mkdir(exist_ok=True)
+            out = []
+            for w in self.weights:
+                with self._in_weight(w):
+                    info = self.font.info
+                    path = self.build_dir / f"{info.familyName}-{info.styleName}.otf".replace(" ", "")
+                    path.write_bytes(compile_fn(self.font))
+                    out.append(path)
+            return out
 
     @classmethod
     def create(cls, folder: str | Path, name: str) -> "Project":
@@ -142,7 +325,7 @@ class Project:
         for sub in ("glyphs", "build"):
             (folder / DEFAULT_PATHS[sub]).mkdir()
         file = folder / _file_name(name)
-        _write_project_file(file, name)
+        _write_project_file(file, name, [Weight("Regular", 400, DEFAULT_PATHS["glyphs"], DEFAULT_PATHS["font"])])
         project = cls(file)
         project._ensure_auto_glyphs()
         project._commit()
@@ -162,21 +345,21 @@ class Project:
         if ufo.is_dir():
             family = ufoLib2.Font.open(ufo, lazy=True).info.familyName
             name = family or name
-        _write_project_file(folder / _file_name(name), name)
+        weight = _single_weight(folder, DEFAULT_PATHS["glyphs"], DEFAULT_PATHS["font"])
+        _write_project_file(folder / _file_name(name), name, [weight])
         return cls(folder)
 
     def save_settings(self, values: dict):
         with self.lock:
             self.settings.update(values)
-            data = json.loads(self.file.read_text(encoding="utf-8"))
-            data["settings"] = self.settings
-            self.file.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            self._save_project_file()
 
-    def _new_font(self):
+    def _new_font(self, weight: Weight):
         font = ufoLib2.Font()
         info = font.info
         info.familyName = self.name
-        info.styleName = "Regular"
+        info.styleName = weight.name
+        info.openTypeOS2WeightClass = weight.weight
         for key, value in DEFAULT_INFO.items():
             setattr(info, key, value)
         return font
@@ -453,16 +636,25 @@ class Project:
             self._commit()
 
     def set_info(self, values: dict):
-        allowed = {"familyName", "styleName", "unitsPerEm", "ascender", "descender", "capHeight", "xHeight"}
+        """Family name and vertical metrics apply to every weight; the style
+        name belongs to the weight (and follows its name)."""
+        allowed = set(SHARED_INFO) | {"styleName"}
+        for key in values:
+            if key not in allowed:
+                raise ProjectError(f"Unknown font info field {key!r}")
+        shared = {k: v for k, v in values.items() if k in SHARED_INFO}
         with self.lock:
-            info = self.font.info
-            if any(k in values and values[k] != getattr(info, k) for k in ("ascender", "descender", "unitsPerEm")):
-                self.snapshot("Before changing vertical metrics")
-            for key, value in values.items():
-                if key not in allowed:
-                    raise ProjectError(f"Unknown font info field {key!r}")
-                setattr(self.font.info, key, value)
-            self._commit()
+            metrics_change = any(
+                k in shared and shared[k] != getattr(self.font.info, k) for k in ("ascender", "descender", "unitsPerEm")
+            )
+
+            def apply():
+                if metrics_change:
+                    self.snapshot("Before changing vertical metrics")
+                for key, value in shared.items():
+                    setattr(self.font.info, key, value)
+
+            self._each_weight(apply)
 
     def set_kerning(self, first: str, second: str, value: float):
         """Kern a pair, given in reading order (for Hebrew: the right-hand glyph
@@ -494,27 +686,29 @@ class Project:
         that uses it. A snapshot (with the SVG) is taken first."""
         with self.lock:
             self._deletable(name)
-            source = self._source_path(name)
-            self.snapshot(f"Before deleting {name}", [source] if source else [])
-            removed = {"kerning": 0, "groups": 0, "ligatures": 0}
-            for pair in [p for p in self.font.kerning if name in p]:
-                del self.font.kerning[pair]
-                removed["kerning"] += 1
-            for key, members in list(self.font.groups.items()):
-                if name in members:
-                    self.font.groups[key] = [m for m in members if m != name]
-                    removed["groups"] += 1
-            rules = self.font.lib.get(features.LIGATURES_KEY, [])
-            kept = [r for r in rules if r["glyph"] != name and name not in r["components"]]
-            removed["ligatures"] = len(rules) - len(kept)
-            if rules:
-                self.font.lib[features.LIGATURES_KEY] = kept
-            del self.font[name]
-            if source:
-                source.unlink()
-            self._ensure_auto_glyphs()  # a deleted hand-drawn space falls back to the automatic one
-            self._commit()
-            return removed
+            return self._each_weight(lambda: self._delete_glyph_here(name), only_with=name)
+
+    def _delete_glyph_here(self, name: str) -> dict:
+        source = self._source_path(name)
+        self.snapshot(f"Before deleting {name}", [source] if source else [])
+        removed = {"kerning": 0, "groups": 0, "ligatures": 0}
+        for pair in [p for p in self.font.kerning if name in p]:
+            del self.font.kerning[pair]
+            removed["kerning"] += 1
+        for key, members in list(self.font.groups.items()):
+            if name in members:
+                self.font.groups[key] = [m for m in members if m != name]
+                removed["groups"] += 1
+        rules = self.font.lib.get(features.LIGATURES_KEY, [])
+        kept = [r for r in rules if r["glyph"] != name and name not in r["components"]]
+        removed["ligatures"] = len(rules) - len(kept)
+        if rules:
+            self.font.lib[features.LIGATURES_KEY] = kept
+        del self.font[name]
+        if source:
+            source.unlink()
+        self._ensure_auto_glyphs()  # a deleted hand-drawn space falls back to the automatic one
+        return removed
 
     def rename_glyph(self, old: str, new: str, swap: bool = False, move_alternates: bool = True) -> dict:
         """Reassign a glyph that was named for the wrong character: it (and its
@@ -549,10 +743,25 @@ class Project:
                 for g, target in moves.items():
                     if target in self.font and target not in mapping:
                         raise ProjectError(f"Can't move {g}: {target} already exists")
-            files = [p for p in (self._source_path(n) for n in mapping) if p]
-            self.snapshot(f"Before renaming {old} → {new}{' (swap)' if swap and new in self.font else ''}", files)
-            self._apply_renames(mapping)
-            self._commit()
+            reason = f"Before renaming {old} → {new}{' (swap)' if swap and new in self.font else ''}"
+            # Other weights get the same renames for the glyphs they have; check
+            # them all first so a rename never stops halfway through the family.
+            plans = {}
+            for w in self.weights:
+                with self._in_weight(w):
+                    here = {a: b for a, b in mapping.items() if a in self.font}
+                    for a, b in here.items():
+                        if b in self.font and b not in here:
+                            raise ProjectError(f"Can't rename {a} in {w.name}: {b} already exists there")
+                    plans[w.name] = here
+
+            def apply():
+                here = plans[self.active.name]
+                if here:
+                    self.snapshot(reason, [p for p in (self._source_path(n) for n in here) if p])
+                    self._apply_renames(here)
+
+            self._each_weight(apply)
             return mapping
 
     def _role(self, name: str):
@@ -645,20 +854,24 @@ class Project:
                 self.glyph(g)
             key = self.group_key(side, name)
             if rename_from is not None and rename_from != name:
-                old = self.group_key(side, rename_from)
-                if old not in self.font.groups:
+                if self.group_key(side, rename_from) not in self.font.groups:
                     raise ProjectError(f"No group {rename_from!r}")
                 if key in self.font.groups:
                     raise ProjectError(f"There is already a group {name!r} on that side")
-                del self.font.groups[old]
-                self._rename_in_kerning(old, key, side)
             members = list(dict.fromkeys(glyphs))
-            prefix = f"public.kern{side}."
-            for other, other_members in list(self.font.groups.items()):
-                if other.startswith(prefix) and other != key:
-                    self.font.groups[other] = [g for g in other_members if g not in members]
-            self.font.groups[key] = members
-            self._commit()
+
+            def apply():  # groups are shared, so every weight gets the same change
+                if rename_from is not None and rename_from != name:
+                    old = self.group_key(side, rename_from)
+                    self.font.groups.pop(old, None)
+                    self._rename_in_kerning(old, key, side)
+                prefix = f"public.kern{side}."
+                for other, other_members in list(self.font.groups.items()):
+                    if other.startswith(prefix) and other != key:
+                        self.font.groups[other] = [g for g in other_members if g not in members]
+                self.font.groups[key] = members
+
+            self._each_weight(apply)
 
     def delete_kern_group(self, side: int, name: str):
         """Remove a group and every pair that uses it."""
@@ -666,13 +879,16 @@ class Project:
             key = self.group_key(side, name)
             if key not in self.font.groups:
                 raise ProjectError(f"No group {name!r}")
-            uses = [pair for pair in self.font.kerning if key in pair]
-            if uses:
-                self.snapshot(f"Before deleting kerning group @{name} ({len(uses)} pairs)")
-            for pair in uses:
-                del self.font.kerning[pair]
-            del self.font.groups[key]
-            self._commit()
+
+            def apply():
+                uses = [pair for pair in self.font.kerning if key in pair]
+                if uses:
+                    self.snapshot(f"Before deleting kerning group @{name} ({len(uses)} pairs)")
+                for pair in uses:
+                    del self.font.kerning[pair]
+                self.font.groups.pop(key, None)
+
+            self._each_weight(apply)
 
     def _rename_in_kerning(self, old: str, new: str, side: int):
         for (first, second), value in list(self.font.kerning.items()):
@@ -682,12 +898,12 @@ class Project:
                 self.font.kerning[pair] = value
 
     def set_ligatures(self, rules: list[dict]):
+        cleaned = [
+            {"components": list(r["components"]), "glyph": r["glyph"], "feature": r.get("feature", "liga")}
+            for r in rules
+        ]
         with self.lock:
-            self.font.lib[features.LIGATURES_KEY] = [
-                {"components": list(r["components"]), "glyph": r["glyph"], "feature": r.get("feature", "liga")}
-                for r in rules
-            ]
-            self._commit()
+            self._each_weight(lambda: self.font.lib.__setitem__(features.LIGATURES_KEY, [dict(r) for r in cleaned]))
 
     # -- snapshots --------------------------------------------------------------
 
@@ -707,7 +923,7 @@ class Project:
                     shutil.copy2(f, target / "glyphs" / f.name)
                     saved.append(f.name)
             meta = {"id": snap_id, "reason": reason, "created": datetime.now().isoformat(timespec="seconds"),
-                    "files": saved}
+                    "files": saved, "weight": self.active.name}
             (target / "snapshot.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
             for old in self.snapshots()[KEEP_SNAPSHOTS:]:
                 shutil.rmtree(self.snapshots_dir / old["id"], ignore_errors=True)
@@ -725,21 +941,26 @@ class Project:
         return sorted(out, key=lambda m: m["id"], reverse=True)
 
     def restore(self, snap_id: str):
-        """Put a snapshot back. The current state is snapshotted first, so a
-        restore can itself be undone."""
+        """Put a snapshot back (into the weight it was taken from). The current
+        state is snapshotted first, so a restore can itself be undone."""
         with self.lock:
             source = self.snapshots_dir / snap_id
             if not re.fullmatch(r"[\d-]+", snap_id) or not (source / "font.ufo").is_dir():
                 raise ProjectError(f"No snapshot {snap_id!r}")
             meta = json.loads((source / "snapshot.json").read_text(encoding="utf-8"))
-            current_files = [self.glyphs_dir / f for f in meta.get("files", [])]
-            self.snapshot(f"Before restoring \u201c{meta['reason']}\u201d", current_files)
-            shutil.rmtree(self.ufo_path)
-            shutil.copytree(source / "font.ufo", self.ufo_path)
-            for f in meta.get("files", []):
-                shutil.copy2(source / "glyphs" / f, self.glyphs_dir / f)
-            self.font = ufoLib2.Font.open(self.ufo_path, lazy=False)
+            weight = next((w for w in self.weights if w.name == meta.get("weight")), self.active)
+            with self._in_weight(weight):
+                self._restore_here(source, meta)
             self.revision += 1
+
+    def _restore_here(self, source: Path, meta: dict):
+        current_files = [self.glyphs_dir / f for f in meta.get("files", [])]
+        self.snapshot(f"Before restoring \u201c{meta['reason']}\u201d", current_files)
+        shutil.rmtree(self.ufo_path)
+        shutil.copytree(source / "font.ufo", self.ufo_path)
+        for f in meta.get("files", []):
+            shutil.copy2(source / "glyphs" / f, self.glyphs_dir / f)
+        self.font = ufoLib2.Font.open(self.ufo_path, lazy=False)
 
     # -- persistence ----------------------------------------------------------
 
@@ -778,6 +999,12 @@ class Project:
                 "name": self.name,
                 "settings": self.settings,
                 "revision": self.revision,
+                "weight": self.active.name,
+                "weights": [
+                    {"name": w.name, "weight": w.weight, "glyphs": w.glyphs, "active": w is self.active}
+                    for w in self.weights
+                ],
+                "flatLayout": self.flat_layout,
                 "info": {
                     "familyName": info.familyName,
                     "styleName": info.styleName,
@@ -822,6 +1049,26 @@ class Project:
         with self.lock:
             categories = self.font.lib.get("public.openTypeCategories", {})
             return self._glyph_summary(self.glyph(name), categories)
+
+
+def glyph_preview(project_file: str | Path) -> dict | None:
+    """One letter from a project's font, for a thumbnail on the home screen:
+    alef if it's drawn, otherwise the first drawn glyph. Reads just that glyph."""
+    try:
+        data = json.loads(Path(project_file).read_text(encoding="utf-8"))
+        root = Path(project_file).parent
+        font_rel = data["weights"][0]["font"] if data.get("weights") else data.get("paths", {}).get("font", "font.ufo")
+        font = ufoLib2.Font.open(root / font_rel, lazy=True)
+    except Exception:  # a missing or unreadable project just gets no thumbnail
+        return None
+    order = font.lib.get("public.glyphOrder") or sorted(font.keys())
+    for name in ["uni05D0", *order]:
+        if name.startswith(".") or name not in font:
+            continue
+        glyph = font[name]
+        if len(glyph):
+            return {"name": name, "path": glyph_svg_path(glyph), "bounds": _bounds(glyph)}
+    return None
 
 
 def glyph_svg_path(glyph) -> str:

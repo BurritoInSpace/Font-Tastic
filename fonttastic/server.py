@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from . import illustrator, recent
 from .build import CompileCache, CompileError, compile_otf
-from .project import NeedsConversion, Project, ProjectError
+from .project import NeedsConversion, Project, ProjectError, glyph_preview
 from .watcher import GlyphWatcher
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
@@ -98,6 +98,16 @@ class RenameRequest(BaseModel):
 
 class DuplicateRequest(BaseModel):
     unicode: int
+
+
+class NewWeightRequest(BaseModel):
+    name: str
+    weight: int
+    copyFrom: str
+
+
+class WeightRequest(BaseModel):
+    name: str
 
 
 class KernGroupRequest(BaseModel):
@@ -212,6 +222,13 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
     @app.get("/api/recent")
     def get_recent():
         return {"recent": recent.load()}
+
+    @app.get("/api/recent/preview")
+    def recent_preview(path: str):
+        """A letter from a recent project, for its thumbnail (recent projects only)."""
+        if not any(e["path"] == path for e in recent.load()):
+            raise HTTPException(404, "Not a recent project")
+        return {"preview": glyph_preview(path)}
 
     @app.post("/api/recent/remove")
     def remove_recent(req: OpenRequest):
@@ -348,20 +365,40 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
             headers={"X-Revision": str(project.revision), "Cache-Control": "no-store"},
         )
 
+    # -- weights ----------------------------------------------------------
+
+    def weight_changed(project: Project):
+        """A different weight is active: new font to compile, new folder to watch."""
+        state.set_project(project)
+        return {"project": project.summary(), "import": project.import_all()}
+
+    @app.post("/api/weights")
+    def add_weight(req: NewWeightRequest):
+        project = state.require()
+        guard(project.add_weight, req.name.strip(), req.weight, req.copyFrom)
+        return weight_changed(project)
+
+    @app.post("/api/weights/switch")
+    def switch_weight(req: WeightRequest):
+        project = state.require()
+        guard(project.switch_weight, req.name)
+        return weight_changed(project)
+
+    @app.post("/api/weights/delete")
+    def delete_weight(req: WeightRequest):
+        project = state.require()
+        guard(project.delete_weight, req.name)
+        return weight_changed(project)
+
     @app.post("/api/export")
     def export():
+        """Compile every weight to build/<Family>-<Style>.otf."""
         project = state.require()
-        with project.lock:
-            try:
-                data = compile_otf(project.font, preview=False)
-            except CompileError as exc:
-                raise HTTPException(422, str(exc))
-            info = project.font.info
-            name = f"{info.familyName}-{info.styleName}".replace(" ", "")
-        project.build_dir.mkdir(exist_ok=True)
-        out = project.build_dir / f"{name}.otf"
-        out.write_bytes(data)
-        return {"path": str(out), "bytes": len(data)}
+        try:
+            paths = project.export_all(lambda font: compile_otf(font, preview=False))
+        except CompileError as exc:
+            raise HTTPException(422, str(exc))
+        return {"paths": [str(p) for p in paths], "bytes": sum(p.stat().st_size for p in paths)}
 
     if FRONTEND_DIST.is_dir():
         app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")

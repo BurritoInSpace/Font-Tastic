@@ -42,8 +42,9 @@ export function GlyphGrid({ glyphs, info, selected, onSelect, onImport }: Props)
       }}
     >
       <div className="grid-actions">
-        <button onClick={() => fileInput.current?.click()} title="Add SVG files to the project (or drop them here)">
-          Import SVGs…
+        <button className="import-button" onClick={() => fileInput.current?.click()}
+          title="Add SVG files to the project (or drop them here)">
+          <span className="plus">+</span> Import SVGs…
         </button>
         <input ref={fileInput} type="file" accept=".svg,image/svg+xml" multiple hidden
           onChange={(e) => {

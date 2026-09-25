@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type FontInfo, type Project, type Snapshot } from '../api'
+import { useConfirm } from './Confirm'
 
 const FIELDS: { key: keyof FontInfo; label: string; numeric?: boolean }[] = [
   { key: 'familyName', label: 'Family name' },
@@ -16,9 +17,11 @@ interface Props {
   onChanged: (reimport: boolean) => void
   onRestored: (project: Project) => void
   onError: (msg: string) => void
+  onDeleteWeight: (name: string) => void
 }
 
-export function InfoPanel({ project, onChanged, onRestored, onError }: Props) {
+export function InfoPanel({ project, onChanged, onRestored, onError, onDeleteWeight }: Props) {
+  const confirm = useConfirm()
   const [draft, setDraft] = useState<FontInfo>(project.info)
   useEffect(() => setDraft(project.info), [project.info])
 
@@ -35,7 +38,7 @@ export function InfoPanel({ project, onChanged, onRestored, onError }: Props) {
   }
 
   return (
-    <div className="panel">
+    <div className="panel light">
       <h2>{project.name}</h2>
       <div className="project-location">
         <span className="muted small">Project file</span>
@@ -49,6 +52,8 @@ export function InfoPanel({ project, onChanged, onRestored, onError }: Props) {
             <span>{f.label}</span>
             <input
               className={f.numeric ? 'num' : undefined}
+              readOnly={f.key === 'styleName'}
+              title={f.key === 'styleName' ? 'The style name is the weight\'s name' : undefined}
               value={draft[f.key]}
               onChange={(e) =>
                 setDraft({ ...draft, [f.key]: f.numeric ? Number(e.target.value) || 0 : e.target.value })
@@ -65,13 +70,42 @@ export function InfoPanel({ project, onChanged, onRestored, onError }: Props) {
         <button className="primary" disabled={!dirty} onClick={() => void save()}>Save</button>
       </div>
 
+      <h4>Weights</h4>
+      <p className="muted small">
+        Each weight has its own SVGs, anchors, widths and kerning. The glyph set, kerning groups, ligatures, family name
+        and vertical metrics are shared. Switch or add weights from the menu at the top left.
+      </p>
+      <table className="rules weights-table">
+        <tbody>
+          {project.weights.map((w) => (
+            <tr key={w.name}>
+              <td><strong>{w.name}</strong>{w.active && <span className="muted small"> · editing</span>}</td>
+              <td className="num-cell">{w.weight}</td>
+              <td className="muted small mono">{w.glyphs}/</td>
+              <td>
+                <button className="icon" title={`Remove ${w.name}`} disabled={project.weights.length === 1}
+                  onClick={async () => {
+                    if (await confirm({
+                      title: `Remove the ${w.name} weight?`,
+                      body: <p>Its SVG folder and font data are moved into <code>snapshots/removed-weights/</code>, not deleted.</p>,
+                      confirmLabel: 'Remove weight',
+                      danger: true,
+                    })) onDeleteWeight(w.name)
+                  }}>×</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
       <Snapshots project={project} onRestored={onRestored} onError={onError} />
     </div>
   )
 }
 
-function Snapshots({ project, onRestored, onError }: Omit<Props, 'onChanged'>) {
+function Snapshots({ project, onRestored, onError }: Omit<Props, 'onChanged' | 'onDeleteWeight'>) {
   const [snapshots, setSnapshots] = useState<Snapshot[] | null>(null)
+  const confirm = useConfirm()
 
   useEffect(() => {
     api.snapshots().then((r) => setSnapshots(r.snapshots)).catch((e) => onError(String(e)))
@@ -80,8 +114,16 @@ function Snapshots({ project, onRestored, onError }: Omit<Props, 'onChanged'>) {
 
   const restore = async (s: Snapshot) => {
     const when = new Date(s.created).toLocaleString()
-    if (!window.confirm(`Restore the project to how it was ${when} (${s.reason.toLowerCase()})?\n\n` +
-      'The current state is snapshotted first, so this can be undone too.')) return
+    if (!(await confirm({
+      title: 'Restore this snapshot?',
+      body: (
+        <>
+          <p>The project goes back to how it was {when} ({s.reason.toLowerCase()}).</p>
+          <p>The current state is snapshotted first, so this can be undone too.</p>
+        </>
+      ),
+      confirmLabel: 'Restore',
+    }))) return
     try {
       const res = await api.restore(s.id)
       setSnapshots(res.snapshots)

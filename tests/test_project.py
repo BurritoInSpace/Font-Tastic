@@ -20,7 +20,8 @@ def test_create_makes_self_contained_layout(tmp_path):
     assert p.file == root / "My Font.fonttastic"
     assert (root / "glyphs").is_dir() and (root / "build").is_dir() and (root / "font.ufo").is_dir()
     data = json.loads(p.file.read_text(encoding="utf-8"))
-    assert data["format"] == "fonttastic-project" and data["paths"]["glyphs"] == "glyphs"
+    assert data["format"] == "fonttastic-project"
+    assert data["weights"] == [{"name": "Regular", "weight": 400, "glyphs": "glyphs", "font": "font.ufo"}]
     assert p.font.info.familyName == "My Font"
 
 
@@ -137,3 +138,14 @@ def test_project_api(tmp_path):
     r = client.put("/api/project/settings", json={"previewText": "אב"})
     assert r.json()["settings"]["previewText"] == "אב"
     assert client.get("/api/snapshots").json() == {"snapshots": []}
+
+
+def test_recent_preview_thumbnail(tmp_path):
+    p = Project.create(tmp_path / "P", "P")
+    (p.glyphs_dir / "uni05D1.svg").write_bytes(SQUARE)
+    p.import_all()
+    client = TestClient(create_app())
+    assert client.get("/api/recent/preview", params={"path": str(p.file)}).status_code == 404  # not recent
+    recent.touch(p.file, "P")
+    preview = client.get("/api/recent/preview", params={"path": str(p.file)}).json()["preview"]
+    assert preview["name"] == "uni05D1" and preview["path"].startswith("M")  # no alef: first drawn glyph

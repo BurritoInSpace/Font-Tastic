@@ -111,6 +111,15 @@ editing matches real-world rendering.
 
 ## Variable fonts (Phase 2, not Phase 1)
 
+*Groundwork done:* projects already hold several weights (static masters),
+each with its own SVG folder (`glyphs/<Weight>/`) and UFO
+(`masters/<Weight>.ufo`), sharing the glyph set, kerning groups, ligature
+rules and metrics. New weights start as copies of an existing one, so their
+outlines stay point-compatible. That replaces the earlier idea of
+`uni05D0-Bold.svg` suffixes in one folder. What's left for variable fonts is
+the compatibility checking, the designspace/axis setup and the variable
+build.
+
 The hard part is **interpolation compatibility**, not the axis math —
 `fontTools.varLib` interpolates fine once inputs match. Since masters
 arrive as independent Illustrator exports, nothing enforces matching

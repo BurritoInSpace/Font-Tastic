@@ -1,15 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, readBase64, type ChangeEvent, type ImportReport, type Project } from './api'
+import { logo, tabIcons } from './assets'
 import { GlyphEditor } from './components/GlyphEditor'
 import { GlyphGrid } from './components/GlyphGrid'
 import { HomeScreen } from './components/HomeScreen'
 import { ImportDialog, type Upload } from './components/ImportDialog'
 import { InfoPanel } from './components/InfoPanel'
+import { NewWeightDialog } from './components/NewWeightDialog'
 import { KerningPanel } from './components/KerningPanel'
 import { LigaturesPanel } from './components/LigaturesPanel'
 import { Preview } from './components/Preview'
 
 type Tab = 'glyph' | 'kerning' | 'ligatures' | 'project'
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'glyph', label: 'glyphs' },
+  { id: 'kerning', label: 'kerning' },
+  { id: 'ligatures', label: 'ligatures' },
+  { id: 'project', label: 'project' },
+]
 
 export default function App() {
   const [project, setProject] = useState<Project | null>(null)
@@ -19,6 +28,7 @@ export default function App() {
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null)
   const [uploads, setUploads] = useState<Upload[] | null>(null)
   const [watching, setWatching] = useState(false)
+  const [newWeight, setNewWeight] = useState(false)
   const revision = useRef<number | null>(null)
   revision.current = project?.revision ?? null
 
@@ -124,10 +134,21 @@ export default function App() {
     }
   }
 
+  const switchWeight = async (name: string) => {
+    try {
+      const res = await api.switchWeight(name)
+      setProject(res.project)
+      setMessage({ text: `Editing ${name}` })
+    } catch (e) {
+      onError(String(e))
+    }
+  }
+
   const exportOtf = async () => {
     try {
       const res = await api.exportOtf()
-      setMessage({ text: `Exported ${res.path} (${Math.round(res.bytes / 1024)} KB)` })
+      const names = res.paths.map((p) => p.split(/[\\/]/).pop())
+      setMessage({ text: `Exported ${names.join(', ')} to build/ (${Math.round(res.bytes / 1024)} KB)` })
     } catch (e) {
       onError(String(e))
     }
@@ -140,39 +161,48 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="toolbar">
-        <div className="title">
-          <strong>{project.name}</strong>{' '}
-          <span className="muted">
-            {project.info.familyName !== project.name && `${project.info.familyName} `}{project.info.styleName}
-          </span>
+      <header className="topbar">
+        <img className="topbar-logo" src={logo} alt="Font-tastic" />
+        <div className="topbar-title">
+          <div className="font-name" title={project.file}>{project.name}</div>
+          <select className="weight-menu" value={project.weight} title="Weight being edited"
+            onChange={(e) => e.target.value === '+new' ? setNewWeight(true) : void switchWeight(e.target.value)}>
+            {project.weights.map((w) => <option key={w.name} value={w.name}>{w.name} · {w.weight}</option>)}
+            <option value="+new">+ New weight…</option>
+          </select>
         </div>
         <nav className="tabs">
-          {(['glyph', 'kerning', 'ligatures', 'project'] as Tab[]).map((t) => (
-            <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
-              {{ glyph: 'Glyphs', kerning: 'Kerning', ligatures: 'Ligatures', project: 'Project' }[t]}
+          {TABS.map((t) => (
+            <button key={t.id} className={`tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
+              <img src={tabIcons[t.id]} alt="" />
+              {t.label}
             </button>
           ))}
         </nav>
-        <span className="spacer" />
-        <span className={`live${watching ? ' on' : ''}`}
-          title={watching ? 'Watching glyphs/: SVGs saved in Illustrator update here automatically'
-            : 'Not watching for changes; use Re-import'}>
-          {watching ? 'Live' : 'Not live'}
-        </span>
-        {message && (
-          <span className={`message${message.error ? ' error' : ''}`} onClick={() => setMessage(null)}>
-            {message.text}
+        <div className="topbar-status">
+          {message && (
+            <span className={`message${message.error ? ' error' : ''}`} onClick={() => setMessage(null)} title={message.text}>
+              {message.text}
+            </span>
+          )}
+          <span className={`live${watching ? ' on' : ''}`}
+            title={watching ? 'Watching the glyph folder: SVGs saved in Illustrator update here automatically'
+              : 'Not watching for changes; use Reimport'}>
+            {watching ? 'Live' : 'Not live'}
           </span>
-        )}
-        <button onClick={(e) => void reimport(e.shiftKey)}
-          title="Re-read SVGs changed since the last import (Shift-click: re-read all)">
-          Re-import
-        </button>
-        <button onClick={() => void exportOtf()}>Export OTF</button>
-        <button onClick={() => void closeProject()} title="Close this project and go to the project list">
-          Switch project
-        </button>
+        </div>
+        <div className="topbar-actions">
+          <button className="primary" onClick={(e) => void reimport(e.shiftKey)}
+            title="Re-read SVGs changed since the last import (Shift-click: re-read all)">
+            Reimport
+          </button>
+          <button className="primary" onClick={() => void exportOtf()} title="Compile every weight into build/">
+            Export OTF
+          </button>
+          <button className="primary" onClick={() => void closeProject()} title="Close this project and go to the home screen">
+            Home
+          </button>
+        </div>
       </header>
 
       <main className="workspace">
@@ -186,16 +216,40 @@ export default function App() {
             ) : (
               <div className="empty">Pick a glyph on the left to place its anchors.</div>
             ))}
-          {tab === 'kerning' && <KerningPanel project={project} onChanged={refresh} onError={onError} />}
-          {tab === 'ligatures' && <LigaturesPanel project={project} onChanged={refresh} onError={onError} />}
+          {tab === 'kerning' && <KerningPanel key={project.weight} project={project} onChanged={refresh} onError={onError} />}
+          {tab === 'ligatures' && (
+            <div className="panel-page">
+              <LigaturesPanel project={project} onChanged={refresh} onError={onError} />
+            </div>
+          )}
           {tab === 'project' && (
+            <div className="panel-page">
             <InfoPanel project={project} onError={onError} onRestored={setProject}
+              onDeleteWeight={async (name) => {
+                try {
+                  const res = await api.deleteWeight(name)
+                  setProject(res.project)
+                  setMessage({ text: `Removed ${name}; its files were moved to snapshots/removed-weights/` })
+                } catch (e) {
+                  onError(String(e))
+                }
+              }}
               onChanged={(reimportAll) => (reimportAll ? reimport(true) : refresh())} />
+            </div>
           )}
         </div>
       </main>
 
       <Preview project={project} onSelectGlyph={(n) => { setSelected(n); setTab('glyph') }} />
+
+      {newWeight && (
+        <NewWeightDialog project={project} onCancel={() => setNewWeight(false)}
+          onDone={(next, name) => {
+            setNewWeight(false)
+            setProject(next)
+            setMessage({ text: `Added ${name}, a copy to redraw. Editing it now.` })
+          }} />
+      )}
 
       {uploads && (
         <ImportDialog project={project} uploads={uploads} onCancel={() => setUploads(null)} onDone={finishImport} />
