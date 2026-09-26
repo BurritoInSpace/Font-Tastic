@@ -37,11 +37,27 @@ def test_group_transforms_compose():
     assert bbox(out.contours[0]) == (100, 100, 200, 200)
 
 
-def test_overlaps_are_merged_and_outer_contours_counter_clockwise():
+def test_overlapping_shapes_are_kept_as_drawn_and_wind_alike():
+    # merged only on static export; kept separate so weights stay point-compatible
     body = '<rect x="0" y="100" width="300" height="100"/><rect x="200" y="100" width="100" height="700"/>'
     out = parse_svg(svg(body), ASC, DESC)
-    assert len(out.contours) == 1
-    assert _signed_area(out.contours[0]) > 0
+    assert len(out.contours) == 2
+    assert all(_signed_area(c) > 0 for c in out.contours)  # both counter-clockwise: they fill as a union
+
+
+def test_shapes_drawn_either_way_are_normalised():
+    ccw = '<path d="M0,100 H400 V800 H0 Z"/>'
+    cw = '<path d="M500,100 V800 H900 V100 Z"/>'
+    out = parse_svg(svg(ccw + cw, w=1000), ASC, DESC)
+    assert all(_signed_area(c) > 0 for c in out.contours)
+
+
+def test_nonzero_compound_hole_stays_a_hole():
+    # outer drawn one way, counter drawn the other: a hole under nonzero filling
+    body = '<path d="M0,100 H400 V800 H0 Z M100,200 V700 H300 V200 Z"/>'
+    out = parse_svg(svg(body), ASC, DESC)
+    areas = sorted(_signed_area(c) for c in out.contours)
+    assert areas[0] < 0 < areas[1]
 
 
 def test_evenodd_counter_becomes_a_hole():

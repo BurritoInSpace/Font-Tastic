@@ -15,19 +15,32 @@ class CompileError(Exception):
 def compile_otf(font, preview: bool = True) -> bytes:
     """Compile to CFF-flavoured OpenType.
 
-    ``preview`` skips CFF subroutinization, which is by far the slowest step
-    and makes no visible difference; exports use the full optimisation.
+    ``preview`` skips CFF subroutinization and overlap removal, the slow steps,
+    which make no visible difference on screen. Exports merge overlapping
+    contours (kept separate in the sources for interpolation) and subroutinize.
     """
     try:
         otf = ufo2ft.compileOTF(
             font,
             useProductionNames=False,
+            removeOverlaps=not preview,
             optimizeCFF=CFFOptimization.NONE if preview else CFFOptimization.SUBROUTINIZE,
         )
     except Exception as exc:
         raise CompileError(f"{type(exc).__name__}: {exc}") from exc
     buf = io.BytesIO()
     otf.save(buf)
+    return buf.getvalue()
+
+
+def compile_ttf(font) -> bytes:
+    """Compile to TrueType-flavoured OpenType (quadratic curves), overlaps merged."""
+    try:
+        ttf = ufo2ft.compileTTF(font, useProductionNames=False, removeOverlaps=True)
+    except Exception as exc:
+        raise CompileError(f"{type(exc).__name__}: {exc}") from exc
+    buf = io.BytesIO()
+    ttf.save(buf)
     return buf.getvalue()
 
 

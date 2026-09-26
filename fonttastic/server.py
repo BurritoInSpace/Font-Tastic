@@ -13,8 +13,8 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import illustrator, recent
-from .build import CompileCache, CompileError, compile_otf
+from . import illustrator, recent, variable
+from .build import CompileCache, CompileError, compile_otf, compile_ttf
 from .project import NeedsConversion, Project, ProjectError, glyph_preview
 from .watcher import GlyphWatcher
 
@@ -108,6 +108,19 @@ class NewWeightRequest(BaseModel):
 
 class WeightRequest(BaseModel):
     name: str
+
+
+class ExportRequest(BaseModel):
+    """What to export. Defaults: everything."""
+
+    staticFormats: list[str] = ["otf", "ttf"]
+    weights: list[str] | None = None  # None: every weight
+    variableFormats: list[str] = ["otf", "ttf"]
+
+
+class VariableRequest(BaseModel):
+    default: str | None = None
+    instances: list[dict] | None = None
 
 
 class KernGroupRequest(BaseModel):
@@ -372,6 +385,11 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
         state.set_project(project)
         return {"project": project.summary(), "import": project.import_all()}
 
+    @app.get("/api/compat")
+    def compatibility():
+        """Can the weights interpolate? Per-glyph problems for the variable font."""
+        return state.require().compatibility()
+
     @app.post("/api/weights")
     def add_weight(req: NewWeightRequest):
         project = state.require()
@@ -390,15 +408,74 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
         guard(project.delete_weight, req.name)
         return weight_changed(project)
 
-    @app.post("/api/export")
-    def export():
-        """Compile every weight to build/<Family>-<Style>.otf."""
+    # -- variable font ------------------------------------------------------
+
+    @app.get("/api/variable")
+    def get_variable():
         project = state.require()
+        if len(project.weights) < 2:
+            return {"available": False}
+        return {"available": True, **variable.settings(project)}
+
+    @app.put("/api/variable")
+    def put_variable(req: VariableRequest):
+        project = state.require()
+        guard(variable.save_settings, project, req.default, req.instances)
+        return {"available": True, **variable.settings(project)}
+
+    preview_cache: dict = {}
+
+    @app.get("/api/variable.otf")
+    def variable_preview():
+        """The variable font for the live preview: glyphs that don't match
+        across weights yet stay at the default weight instead of failing."""
+        project = state.require()
+        key = (id(project), project.revision)
+        if preview_cache.get("key") != key:
+            try:
+                preview_cache.update(key=key, data=guard(variable.compile_variable, project, "cff2", True), error=None)
+            except CompileError as exc:
+                preview_cache.update(key=key, data=None, error=str(exc))
+        if preview_cache["error"]:
+            raise HTTPException(422, preview_cache["error"])
+        return Response(preview_cache["data"], media_type="font/otf", headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/export")
+    def export(req: ExportRequest | None = None):
+        """The chosen static formats for the chosen weights, and the variable
+        font in the chosen flavours (when the weights are compatible)."""
+        req = req or ExportRequest()
+        project = state.require()
+        unknown = [f for f in req.staticFormats + req.variableFormats if f not in ("otf", "ttf")]
+        if unknown:
+            raise HTTPException(400, f"Unknown format {unknown[0]!r}")
+        if req.weights is not None:
+            for name in req.weights:
+                guard(project.weight_by_name, name)
+        if not req.staticFormats and not req.variableFormats:
+            raise HTTPException(400, "Nothing to export: pick at least one format")
+        paths = []
         try:
-            paths = project.export_all(lambda font: compile_otf(font, preview=False))
+            if "otf" in req.staticFormats:
+                paths += project.export_all(lambda font: compile_otf(font, preview=False), ".otf", req.weights)
+            if "ttf" in req.staticFormats:
+                paths += project.export_all(compile_ttf, ".ttf", req.weights)
         except CompileError as exc:
             raise HTTPException(422, str(exc))
-        return {"paths": [str(p) for p in paths], "bytes": sum(p.stat().st_size for p in paths)}
+        variable_note = None
+        if req.variableFormats:
+            family = project.font.info.familyName.replace(" ", "")
+            try:
+                for fmt in req.variableFormats:
+                    data = variable.compile_variable(project, "cff2" if fmt == "otf" else "ttf")
+                    path = project.build_dir / f"{family}-VF.{fmt}"
+                    project.build_dir.mkdir(exist_ok=True)
+                    path.write_bytes(data)
+                    paths.append(path)
+            except (CompileError, ProjectError) as exc:
+                variable_note = f"Variable font skipped: {exc}"
+        return {"paths": [str(p) for p in paths], "bytes": sum(p.stat().st_size for p in paths),
+                "variableNote": variable_note}
 
     if FRONTEND_DIST.is_dir():
         app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")

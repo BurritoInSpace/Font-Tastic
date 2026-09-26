@@ -457,3 +457,40 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 /* scrollbars in the app's style */
 * { scrollbar-width: thin; scrollbar-color: #5c5c5c transparent; }
 .light, .light * { scrollbar-color: #9a9a9a transparent; }
+
+/* weight compatibility ------------------------------------------------------- */
+
+.badge.compat { left: 3px; right: auto; font-size: 11px; }
+.badge.compat.error { background: var(--ft-red); color: #fff; }
+.badge.compat.fixable { background: var(--ft-orange); color: #000; }
+.badge.compat.warning { background: var(--ft-yellow); color: #000; }
+.compat-list { display: flex; flex-direction: column; gap: 6px; }
+.compat-list ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.compat-list li { font-size: 12px; line-height: 1.4; padding: 6px 8px; background: var(--ft-white); border-left: 4px solid var(--ft-yellow); }
+.compat-list li.error { border-left-color: var(--ft-red); }
+.compat-list li.fixable { border-left-color: var(--ft-orange); }
+
+/* variable tab ------------------------------------------------------------------ */
+
+.variable-layout { display: grid; grid-template-columns: minmax(0, 1fr) clamp(280px, 22vw, 380px); gap: 6px; height: 100%; background: var(--ft-black); }
+.variable-preview { background: var(--canvas); height: 180px; padding: 12px 16px; }
+.variable-preview svg { width: 100%; height: 100%; }
+.variable-preview path { fill: var(--glyph); }
+.weight-slider { width: 100%; accent-color: var(--ft-black); }
+.weight-readout { font-size: 22px; font-variant-numeric: tabular-nums; }
+.axis { position: relative; height: 58px; margin: 6px 40px 0; border-top: 3px solid var(--ft-black); }
+.axis-stop { position: absolute; top: -9px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 13px; }
+.axis-dot { width: 15px; height: 15px; border-radius: 50%; background: var(--ft-yellow); border: 2px solid var(--ft-black); }
+.compat-report { display: flex; flex-direction: column; gap: 10px; }
+.compat-list li .link { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+
+/* export dialog ------------------------------------------------------------------ */
+
+.export-dialog { width: min(520px, 100%); }
+.export-body { padding: 4px 22px 18px; display: flex; flex-direction: column; gap: 18px; }
+.export-body section { display: flex; flex-direction: column; gap: 8px; }
+.export-body section.disabled .check { opacity: 0.5; }
+.export-body h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-muted); font-weight: 500; }
+.export-body p { margin: 0; }
+.check { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; cursor: pointer; }
+.weights-pick { padding-left: 2px; }

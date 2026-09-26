@@ -7,10 +7,10 @@ FontForge, but built around a specific pipeline: **Illustrator draws glyph
 outlines, this app owns everything typographic** (metrics, anchors, kerning,
 ligatures, compilation). Not a Bezier editor, not an Illustrator plugin.
 
-Builds on an existing FontForge Python batch-import workflow (SVG glyphs →
-Unicode slots, with `salt` alternate support and sofit/final-letter handling
-already solved) — this app replaces that scripting-only workflow with a
-purpose-built UI over the same underlying idea.
+Grew out of the idea behind a FontForge Python batch-import workflow (SVG
+glyphs → Unicode slots, with `salt` alternates and sofit/final letters) — this
+app replaces that scripting approach with a purpose-built UI. No script is
+carried over: the conventions below are implemented directly in the app.
 
 ## Explicit non-goals
 
@@ -46,8 +46,7 @@ Live in-app preview
 ## Interchange format & naming
 
 - **One SVG file per glyph** (not one master file with multiple artboards).
-- Filename = Unicode-slot naming, extending the existing FontForge pipeline's
-  convention, e.g. `uni05D0.svg`.
+- Filename = Unicode-slot naming, e.g. `uni05D0.svg`.
 - For variable fonts later: extend to one SVG per *(glyph, master)*, e.g.
   `uni05D0.svg` (default) / `uni05D0-Bold.svg`.
 - SVG export must have **"Preserve Illustrator Editing Capabilities"** enabled
@@ -68,9 +67,8 @@ No Adobe API needed — same trick Photoshop uses for linked Smart Objects:
 
 ### 1. Import
 Parse the SVG's path data into a UFO glyph object via the fontTools pen
-protocol (`defcon`/`fontParts`). Carries forward the existing Unicode-slot
-mapping, `salt` alternate, and sofit-handling logic from the FontForge
-script.
+protocol (`defcon`/`fontParts`). Handles Unicode-slot mapping, `salt`
+alternates, and sofit (final) letters, which have their own code points.
 
 ### 2. Anchors — niqqud (GPOS mark-to-base / mark-to-mark)
 - UI: place and name anchor points on each glyph after import (in-app

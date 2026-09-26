@@ -61,6 +61,8 @@ export interface ProjectSettings {
   previewText?: string
   /** height of the preview strip, px */
   previewHeight?: number
+  /** what Export writes, remembered per project */
+  export?: { staticFormats: string[]; weights: string[] | null; variableFormats: string[] }
   opticalGap?: Record<'1' | '2', GapMarker>
 }
 
@@ -94,6 +96,31 @@ export interface Project {
   kernGroups: Record<'1' | '2', Record<string, string[]>>
   /** the core niqqud marks the app knows, with the anchor class each attaches to */
   niqqud: { unicode: number; name: string; anchor: string }[]
+}
+
+/** One way a glyph differs between weights (see fonttastic/compat.py). */
+export interface CompatProblem {
+  type: string
+  /** error: can't build; fixable: re-sequencing fixes it; warning: builds, may look off */
+  severity: 'error' | 'fixable' | 'warning'
+  message: string
+  [detail: string]: unknown
+}
+
+export interface CompatReport {
+  glyphs: Record<string, CompatProblem[]>
+  errors: number
+  fixable: number
+  warnings: number
+}
+
+export interface VariableSetup {
+  available: boolean
+  default?: string
+  min?: number
+  max?: number
+  masters?: { name: string; weight: number }[]
+  instances?: { name: string; weight: number }[]
 }
 
 export interface ImportReport {
@@ -222,7 +249,20 @@ export const api = {
     call<Project>('PUT', '/api/kerning/groups', { side, name, glyphs, renameFrom }),
   deleteKernGroup: (side: 1 | 2, name: string) =>
     call<Project>('POST', '/api/kerning/groups/delete', { side, name }),
-  exportOtf: () => call<{ paths: string[]; bytes: number }>('POST', '/api/export'),
+  compat: () => call<CompatReport>('GET', '/api/compat'),
+  variable: () => call<VariableSetup>('GET', '/api/variable'),
+  setVariable: (values: { default?: string; instances?: { name: string; weight: number }[] }) =>
+    call<VariableSetup>('PUT', '/api/variable', values),
+  variableFont: async (): Promise<ArrayBuffer> => {
+    const res = await fetch('/api/variable.otf')
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new ApiError(detail.detail ?? res.statusText)
+    }
+    return res.arrayBuffer()
+  },
+  exportFonts: (choice: { staticFormats: string[]; weights: string[] | null; variableFormats: string[] }) =>
+    call<{ paths: string[]; bytes: number; variableNote: string | null }>('POST', '/api/export', choice),
   addWeight: (name: string, weight: number, copyFrom: string) =>
     call<{ project: Project; import: ImportReport }>('POST', '/api/weights', { name, weight, copyFrom }),
   switchWeight: (name: string) =>

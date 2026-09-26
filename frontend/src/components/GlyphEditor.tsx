@@ -14,6 +14,7 @@ interface Props {
   onOpenGlyph?: (name: string | null) => void
   /** replace the project with one the server returned */
   onProject?: (project: Project) => void
+
 }
 
 const PAD = 160

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import type { FontInfo, Glyph } from '../api'
+import type { CompatReport, FontInfo, Glyph } from '../api'
 import { glyphLabel, sectionOf, type Section } from '../glyphs'
 
 const ORDER: Section[] = ['Letters', 'Marks', 'Alternates & ligatures', 'Other']
@@ -10,9 +10,11 @@ interface Props {
   selected: string | null
   onSelect: (name: string) => void
   onImport: (files: File[]) => void
+  /** weights compatibility, when the project has several weights */
+  compat?: CompatReport | null
 }
 
-export function GlyphGrid({ glyphs, info, selected, onSelect, onImport }: Props) {
+export function GlyphGrid({ glyphs, info, selected, onSelect, onImport, compat }: Props) {
   const fileInput = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const svgs = (list: FileList | null) => [...(list ?? [])].filter((f) => f.name.toLowerCase().endsWith('.svg'))
@@ -69,6 +71,7 @@ export function GlyphGrid({ glyphs, info, selected, onSelect, onImport }: Props)
               >
                 <GlyphThumb glyph={g} info={info} />
                 <span className="cell-label">{g.char || glyphLabel(g)}</span>
+                <CompatBadge problems={compat?.glyphs[g.name]} />
                 {g.sourceMissing ? (
                   <span className="badge missing" title="The SVG file was deleted or moved">?</span>
                 ) : g.warnings.length > 0 && <span className="badge warn" title={g.warnings.join('\n')}>!</span>}
@@ -78,6 +81,17 @@ export function GlyphGrid({ glyphs, info, selected, onSelect, onImport }: Props)
         </section>
       ))}
     </div>
+  )
+}
+
+/** Top-left badge: ≠ needs redrawing, ↻ can be re-sequenced, · may interpolate oddly. */
+function CompatBadge({ problems }: { problems?: { severity: string; message: string }[] }) {
+  if (!problems?.length) return null
+  const worst = problems.some((p) => p.severity === 'error') ? 'error'
+    : problems.some((p) => p.severity === 'fixable') ? 'fixable' : 'warning'
+  const mark = { error: '≠', fixable: '↻', warning: '·' }[worst]
+  return (
+    <span className={`badge compat ${worst}`} title={problems.map((p) => p.message).join('\n')}>{mark}</span>
   )
 }
 

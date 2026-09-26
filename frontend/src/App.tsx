@@ -1,22 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, readBase64, type ChangeEvent, type ImportReport, type Project } from './api'
+import { api, readBase64, type ChangeEvent, type CompatReport, type ImportReport, type Project } from './api'
 import { logo, tabIcons } from './assets'
 import { GlyphEditor } from './components/GlyphEditor'
 import { GlyphGrid } from './components/GlyphGrid'
 import { HomeScreen } from './components/HomeScreen'
+import { ExportDialog } from './components/ExportDialog'
 import { ImportDialog, type Upload } from './components/ImportDialog'
 import { InfoPanel } from './components/InfoPanel'
 import { NewWeightDialog } from './components/NewWeightDialog'
 import { KerningPanel } from './components/KerningPanel'
 import { LigaturesPanel } from './components/LigaturesPanel'
 import { Preview } from './components/Preview'
+import { VariablePanel } from './components/VariablePanel'
 
-type Tab = 'glyph' | 'kerning' | 'ligatures' | 'project'
+type Tab = 'glyph' | 'kerning' | 'ligatures' | 'variable' | 'project'
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'glyph', label: 'glyphs' },
   { id: 'kerning', label: 'kerning' },
   { id: 'ligatures', label: 'ligatures' },
+  { id: 'variable', label: 'variable' },
   { id: 'project', label: 'project' },
 ]
 
@@ -29,6 +32,8 @@ export default function App() {
   const [uploads, setUploads] = useState<Upload[] | null>(null)
   const [watching, setWatching] = useState(false)
   const [newWeight, setNewWeight] = useState(false)
+  const [compat, setCompat] = useState<CompatReport | null>(null)
+  const [exporting, setExporting] = useState(false)
   const revision = useRef<number | null>(null)
   revision.current = project?.revision ?? null
 
@@ -62,6 +67,18 @@ export default function App() {
     source.onerror = () => setWatching(false)
     return () => source.close()
   }, [projectFile, refresh])
+
+  // With several weights, keep a fresh report of what won't interpolate.
+  const multiWeight = (project?.weights.length ?? 0) > 1
+  const projectRevision = project?.revision
+  useEffect(() => {
+    if (!multiWeight) {
+      setCompat(null)
+      return
+    }
+    const t = window.setTimeout(() => api.compat().then(setCompat).catch(() => {}), 400)
+    return () => window.clearTimeout(t)
+  }, [multiWeight, projectRevision])
 
   // Keep the selection in the URL so reloads (and dev hot-reloads) keep it.
   useEffect(() => {
@@ -144,14 +161,14 @@ export default function App() {
     }
   }
 
-  const exportOtf = async () => {
-    try {
-      const res = await api.exportOtf()
-      const names = res.paths.map((p) => p.split(/[\\/]/).pop())
-      setMessage({ text: `Exported ${names.join(', ')} to build/ (${Math.round(res.bytes / 1024)} KB)` })
-    } catch (e) {
-      onError(String(e))
-    }
+  const exported = (res: { paths: string[]; bytes: number; variableNote: string | null }) => {
+    setExporting(false)
+    const names = res.paths.map((p) => p.split(/[\\/]/).pop())
+    setMessage({
+      text: (names.length ? `Exported ${names.join(', ')} to build/ (${Math.round(res.bytes / 1024)} KB)` : 'Nothing exported') +
+        (res.variableNote ? `. ${res.variableNote}` : ''),
+      error: !!res.variableNote,
+    })
   }
 
   if (loading) return <div className="splash">Loading…</div>
@@ -196,8 +213,9 @@ export default function App() {
             title="Re-read SVGs changed since the last import (Shift-click: re-read all)">
             Reimport
           </button>
-          <button className="primary" onClick={() => void exportOtf()} title="Compile every weight into build/">
-            Export OTF
+          <button className="primary" onClick={() => setExporting(true)}
+            title="Choose which weights and formats to write into build/">
+            Export
           </button>
           <button className="primary" onClick={() => void closeProject()} title="Close this project and go to the home screen">
             Home
@@ -206,7 +224,7 @@ export default function App() {
       </header>
 
       <main className="workspace">
-        <GlyphGrid glyphs={project.glyphs} info={project.info} selected={selected}
+        <GlyphGrid glyphs={project.glyphs} info={project.info} selected={selected} compat={compat}
           onSelect={(n) => { setSelected(n); setTab('glyph') }} onImport={(files) => void importFiles(files)} />
         <div className="center">
           {tab === 'glyph' &&
@@ -221,6 +239,10 @@ export default function App() {
             <div className="panel-page">
               <LigaturesPanel project={project} onChanged={refresh} onError={onError} />
             </div>
+          )}
+          {tab === 'variable' && (
+            <VariablePanel project={project} compat={compat} onError={onError}
+              onOpenGlyph={(n) => { setSelected(n); setTab('glyph') }} onNewWeight={() => setNewWeight(true)} />
           )}
           {tab === 'project' && (
             <div className="panel-page">
@@ -249,6 +271,11 @@ export default function App() {
             setProject(next)
             setMessage({ text: `Added ${name}, a copy to redraw. Editing it now.` })
           }} />
+      )}
+
+      {exporting && (
+        <ExportDialog project={project} compat={compat} onCancel={() => setExporting(false)} onDone={exported}
+          onError={(m) => { setExporting(false); onError(m) }} />
       )}
 
       {uploads && (

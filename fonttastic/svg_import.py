@@ -5,6 +5,11 @@ ascender, its bottom edge the descender, and its width the advance width.
 So in Illustrator the artboard *is* the glyph cell — sidebearings are drawn,
 not typed (they can still be adjusted in-app afterwards).
 
+Contours are kept as drawn: overlapping shapes stay separate (they're merged
+when a static font is exported). Merging on import would give each weight a
+different point structure wherever overlaps differ, and weights must match
+point for point to interpolate into a variable font.
+
 fontTools' own ``SVGPath`` only understands ``matrix()`` on the drawn element
 itself, so this module walks the tree itself to get group transforms, CSS
 classes, hidden layers and fill rules right, and reuses fontTools only for
@@ -19,7 +24,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from booleanOperations.booleanGlyph import BooleanGlyph
 from fontTools.misc.transform import Identity, Transform
 from fontTools.pens.areaPen import AreaPen
 from fontTools.pens.pointInsidePen import PointInsidePen
@@ -115,13 +119,13 @@ def parse_svg(data: bytes, ascender: float, descender: float) -> ImportedOutline
     for tag in sorted(seen_unsupported):
         warnings.append(f"<{tag}> elements are not supported and were skipped.")
 
-    all_contours: list[list[tuple]] = []
-    for contours, rule in elements:
+    contours: list[list[tuple]] = []
+    for element_contours, rule in elements:
         if rule == "evenodd":
-            contours = _orient_by_depth(contours)
-        all_contours.extend(contours)
-
-    contours = _remove_overlap(all_contours)
+            element_contours = _orient_by_depth(element_contours)
+        else:
+            element_contours = _outer_counter_clockwise(element_contours)
+        contours.extend(element_contours)
     if not contours:
         warnings.append("No filled shapes found.")
     return ImportedOutline(contours, vb_w * scale, _dedupe(warnings))
@@ -217,19 +221,18 @@ def _orient_by_depth(contours):
     return out
 
 
-def _remove_overlap(contours):
-    """Union all shapes (Illustrator glyphs are often overlapping pieces) and
-    normalise winding to PostScript convention: outer contours counter-clockwise."""
-    if not contours:
-        return []
-    glyph = BooleanGlyph()
-    pen = glyph.getPen()
-    for contour in contours:
-        _replay(contour, pen)
-    result = glyph.removeOverlap()
-    rec = RecordingPen()
-    result.draw(rec)
-    return _orient_by_depth(_split_contours(rec.value))
+def _outer_counter_clockwise(contours):
+    """Make one nonzero-filled shape wind the PostScript way (outer contours
+    counter-clockwise) by reversing all of it if needed. Holes drawn in the
+    opposite direction keep that relationship, and every separate shape ends up
+    winding the same way, so overlapping shapes still fill as a union."""
+    outer = [
+        c for i, c in enumerate(contours)
+        if not any(j != i and _inside(c[0][1][0], other) for j, other in enumerate(contours))
+    ]
+    if sum(_signed_area(c) for c in outer) < 0:
+        return [_reversed(c) for c in contours]
+    return contours
 
 
 # -- SVG plumbing -----------------------------------------------------------

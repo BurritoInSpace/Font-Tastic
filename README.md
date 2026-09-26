@@ -111,10 +111,40 @@ point-compatible, which variable fonts will need later.
   into `glyphs/Regular/` and `masters/Regular.ufo`.
 - The Illustrator watcher follows the weight you're editing. SVGs changed in
   another weight's folder are picked up when you switch to it.
-- **Export OTF** writes every weight, e.g. `build/MyFont-Regular.otf` and
-  `build/MyFont-Bold.otf`.
+- **Export** opens a dialog to choose what goes into `build/`: single weights
+  as OTF and/or TTF (all weights or just some), and the variable font as OTF
+  and/or TTF when the weights match (see below). The choice is remembered per
+  project.
 - Removing a weight (Project tab) moves its files into
   `snapshots/removed-weights/` instead of deleting them.
+
+### Variable fonts
+
+With two or more weights, the **variable** tab turns them into one variable
+font with a weight axis:
+
+- **Weight axis:** each weight sits on the axis at its weight class; pick
+  the default weight (what the font shows when no weight is chosen).
+- **Named instances:** the in-between styles apps list by name (Medium 500,
+  SemiBold 600, and so on). Edit, add or remove them.
+- **Interpolation preview:** a weight slider (and one button per instance)
+  showing the real variable font, shaped by HarfBuzz.
+- **Compatibility:** weights interpolate point by point, so every glyph needs
+  the same contours, segments, segment kinds (straight or curved), start
+  points and anchors in every weight. Mismatches are reported in plain
+  words, e.g. "Contour 2 has 1 more segment in Bold than in Regular", in the
+  variable tab, sorted into *needs redrawing*, *fixable in the app* (a
+  different start point or contour order) and *may look off in between*
+  (warnings). In the glyph list, a red **≠** or orange **↻** badge marks the
+  glyphs concerned.
+- **Export** can write `build/MyFont-VF.otf` (CFF2: cubic curves exactly as
+  drawn) and `build/MyFont-VF.ttf` (TrueType: curves converted compatibly
+  across weights). These options stay disabled, with the reason, until
+  nothing needs redrawing or fixing. The preview still works meanwhile, with the
+  mismatched glyphs held at the default weight.
+- Contours are imported exactly as drawn (overlaps are kept), because merging
+  overlapping shapes gives each weight a different point structure. Static
+  exports merge the overlaps; variable fonts keep them, as they should.
 
 Each `.ufo` is a standard UFO with `features.fea` and GDEF categories always
 regenerated, so `fontmake -u font.ufo` works without the app.
@@ -258,7 +288,6 @@ ligatures and alternates → compile → RTL preview, plus project handling
 trip (folder watcher, Edit in Illustrator).
 
 Next:
-- Porting logic from the existing FontForge script
 - Variable fonts (Phase 2)
 - Bilingual/multilingual fonts, Hebrew + Latin first (Phase 3, the end
   goal; see the brief)

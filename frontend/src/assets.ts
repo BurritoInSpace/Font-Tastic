@@ -5,9 +5,10 @@ import glyphsIcon from '../../images/glyphs.png'
 import kerningIcon from '../../images/kerning.png'
 import ligaturesIcon from '../../images/ligatures.png'
 import projectIcon from '../../images/project.png'
+import variableIcon from '../../images/variable.png'
 
 export { logo, wordmark }
-export const tabIcons = { glyph: glyphsIcon, kerning: kerningIcon, ligatures: ligaturesIcon, project: projectIcon }
+export const tabIcons = { glyph: glyphsIcon, kerning: kerningIcon, ligatures: ligaturesIcon, variable: variableIcon, project: projectIcon }
 
 export const GITHUB_URL = 'https://github.com/BurritoInSpace/Font-Tastic'
 /** The GitHub mark, as drawn in the design file (54x54 box). */

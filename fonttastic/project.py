@@ -49,6 +49,10 @@ SOURCE_MTIME = f"{LIB}.sourceMtime"
 WARNINGS = f"{LIB}.warnings"
 WIDTH_OVERRIDE = f"{LIB}.widthOverride"
 AUTO = f"{LIB}.auto"
+IMPORT_VERSION_KEY = f"{LIB}.importVersion"
+# Bump when the importer's output changes, so existing glyphs are re-read once.
+# 2: contours kept as drawn (no overlap merging).
+IMPORT_VERSION = 2
 
 DEFAULT_INFO = dict(unitsPerEm=1000, ascender=800, descender=-200, capHeight=700, xHeight=500)
 
@@ -302,15 +306,38 @@ class Project:
                 self._save_project_file()
                 self.revision += 1
 
-    def export_all(self, compile_fn) -> list[Path]:
-        """Compile every weight to build/<Family>-<Style>.otf."""
+    def weight_fonts(self) -> list[tuple[str, object]]:
+        """(name, font) for every weight, lightest first; the active weight is
+        the live in-memory font, the others are read from disk."""
+        out = []
+        for w in sorted(self.weights, key=lambda w: w.weight):
+            if w is self.active:
+                out.append((w.name, self.font))
+            elif (self.root / w.font).exists():
+                out.append((w.name, ufoLib2.Font.open(self.root / w.font, lazy=False)))
+        return out
+
+    def compatibility(self) -> dict:
+        """Whether the weights can interpolate (see compat.py). Cached until the
+        project changes."""
+        from . import compat
+
+        with self.lock:
+            if getattr(self, "_compat_cache", (None,))[0] != self.revision:
+                self._compat_cache = (self.revision, compat.check(self.weight_fonts()))
+            return self._compat_cache[1]
+
+    def export_all(self, compile_fn, suffix: str = ".otf", weights: list[str] | None = None) -> list[Path]:
+        """Compile every weight (or just ``weights``) to build/<Family>-<Style><suffix>."""
         with self.lock:
             self.build_dir.mkdir(exist_ok=True)
             out = []
             for w in self.weights:
+                if weights is not None and w.name not in weights:
+                    continue
                 with self._in_weight(w):
                     info = self.font.info
-                    path = self.build_dir / f"{info.familyName}-{info.styleName}.otf".replace(" ", "")
+                    path = self.build_dir / f"{info.familyName}-{info.styleName}{suffix}".replace(" ", "")
                     path.write_bytes(compile_fn(self.font))
                     out.append(path)
             return out
@@ -383,7 +410,8 @@ class Project:
                 seen.add(parsed.glyph_name)
                 glyph = self.font.get(parsed.glyph_name)
                 mtime = path.stat().st_mtime
-                if not force and glyph is not None and glyph.lib.get(SOURCE_MTIME) == mtime:
+                current = glyph is not None and glyph.lib.get(IMPORT_VERSION_KEY) == IMPORT_VERSION
+                if not force and current and glyph.lib.get(SOURCE_MTIME) == mtime:
                     report["unchanged"] += 1
                     continue
                 try:
@@ -446,6 +474,7 @@ class Project:
         glyph.lib[SOURCE] = path.name
         glyph.lib[SOURCE_MTIME] = path.stat().st_mtime
         glyph.lib[WARNINGS] = outline.warnings
+        glyph.lib[IMPORT_VERSION_KEY] = IMPORT_VERSION
 
         category = naming.category_for(parsed)
         if not glyph.lib.get(WIDTH_OVERRIDE):

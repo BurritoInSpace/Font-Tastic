@@ -27,6 +27,12 @@ export class ShapingFont {
     this.font = new hb.Font(face)
   }
 
+  /** Set variable-font axes, e.g. { wght: 550 }. Outlines are re-read after this. */
+  setVariations(axes: Record<string, number>) {
+    this.font.setVariations(Object.entries(axes).map(([tag, value]) => new hb.Variation(tag, value)))
+    this.paths.clear()
+  }
+
   /**
    * Shape one line. Direction is guessed from the text (Hebrew -> RTL), and
    * HarfBuzz returns RTL runs already in visual (left-to-right) order.

@@ -285,3 +285,31 @@ def test_duplicate_mark_refuses_existing_and_non_niqqud(project):
         project.duplicate_mark("uni05BC", 0x05B9)  # the demo already has holam
     with pytest.raises(Exception):
         project.duplicate_mark("uni05BC", 0x05D0)  # alef isn't a mark
+
+
+# -- contours kept as drawn; merged on static export ------------------------------
+
+OVERLAP = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 1000"><rect x="50" y="100" width="400" height="80"/><rect x="370" y="100" width="80" height="700"/></svg>'
+
+
+def contour_count(data, glyph):
+    import io
+    from fontTools.pens.recordingPen import RecordingPen
+    from fontTools.ttLib import TTFont
+
+    rec = RecordingPen()
+    TTFont(io.BytesIO(data)).getGlyphSet()[glyph].draw(rec)
+    return sum(1 for op, _ in rec.value if op == "moveTo")
+
+
+def test_static_export_merges_overlaps(project):
+    project.add_svg(OVERLAP, "uni05D2")
+    assert len(project.font["uni05D2"]) == 2  # sources keep both shapes
+    assert contour_count(compile_otf(project.font, preview=False), "uni05D2") == 1
+
+
+def test_glyphs_from_the_old_importer_are_reread_once(project):
+    glyph = project.font["uni05D1"]
+    glyph.lib.pop("com.fonttastic.importVersion")  # as if imported before contours were kept as drawn
+    assert "uni05D1" in project.import_all()["imported"]
+    assert project.import_all()["imported"] == []
