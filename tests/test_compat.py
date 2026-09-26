@@ -134,12 +134,16 @@ def test_variable_settings(project):
     project.add_weight("Light", 300, "Regular")
     project.add_weight("Bold", 700, "Regular")
     s = variable.settings(project)
-    assert (s["default"], s["min"], s["max"]) == ("Regular", 300, 700)
-    assert [i["weight"] for i in s["instances"]] == [300, 400, 500, 600, 700]
-    s = variable.save_settings(project, default="Light", instances=[{"name": "Book", "weight": 350}])
-    assert s["default"] == "Light" and s["instances"] == [{"name": "Book", "weight": 350}]
+    (wght,) = s["axes"]
+    assert (s["default"], wght["min"], wght["default"], wght["max"]) == ("Regular", 300, 400, 700)
+    assert [i["location"]["wght"] for i in s["instances"]] == [300, 400, 500, 600, 700]
+    s = variable.save_settings(project, default="Light", instances=[{"name": "Book", "location": {"wght": 350}}])
+    assert s["default"] == "Light" and s["instances"] == [{"name": "Book", "location": {"wght": 350}}]
+    # instances saved by earlier versions (just a weight) still read
+    s = variable.save_settings(project, instances=[{"name": "Book", "weight": 350}])
+    assert s["instances"] == [{"name": "Book", "location": {"wght": 350}}]
     with pytest.raises(Exception):
-        variable.save_settings(project, instances=[{"name": "Heavy", "weight": 900}])
+        variable.save_settings(project, instances=[{"name": "Heavy", "location": {"wght": 900}}])
 
 
 def test_export_writes_every_format(project):

@@ -91,14 +91,16 @@ MyFont/
   buttons in the **Project** tab. A restore snapshots first, so it can be
   undone too.
 
-### Weights
+### Weights and other masters
 
-A project can hold several weights (Light, Regular, Bold…). The menu at the
-top left switches between them, and **+ New weight…** adds one. You pick its
-weight class (100–900), name, and which existing weight it starts as a copy
-of: its SVGs, anchors, widths and kerning. You then redraw its SVGs heavier
-or lighter in Illustrator. Editing copies also keeps the outlines
-point-compatible, which variable fonts will need later.
+A project can hold several masters: weights (Light, Regular, Bold…), and
+with more axes (see below) widths, optical sizes and so on. The menu at the
+top left switches between them, and **+ New master…** adds one. You pick
+where it sits on each axis (weight class, width…), its name (suggested from
+those, e.g. BoldCondensed), and which existing master it starts as a copy
+of: its SVGs, anchors, widths and kerning. You then redraw its SVGs in
+Illustrator. Editing copies also keeps the outlines point-compatible, which
+variable fonts need.
 
 - **Per weight:** outlines (SVGs), advance widths, anchor positions, kerning
   values.
@@ -109,8 +111,8 @@ point-compatible, which variable fonts will need later.
   `glyphs/Bold/` and `masters/Bold.ufo`. A single-weight project keeps the
   flat `glyphs/` + `font.ufo`; adding a second weight moves the current one
   into `glyphs/Regular/` and `masters/Regular.ufo`.
-- The Illustrator watcher follows the weight you're editing. SVGs changed in
-  another weight's folder are picked up when you switch to it.
+- The Illustrator watcher follows every weight's folder, so a save shows up
+  whichever weight is on screen.
 - **Export** opens a dialog to choose what goes into `build/`: single weights
   as OTF and/or TTF (all weights or just some), and the variable font as OTF
   and/or TTF when the weights match (see below). The choice is remembered per
@@ -120,15 +122,26 @@ point-compatible, which variable fonts will need later.
 
 ### Variable fonts
 
-With two or more weights, the **variable** tab turns them into one variable
-font with a weight axis:
+With two or more masters, the **variable** tab turns them into one variable
+font:
 
-- **Weight axis:** each weight sits on the axis at its weight class; pick
-  the default weight (what the font shows when no weight is chosen).
+- **Axes:** weight is always an axis. **+ Add axis** adds width, optical
+  size, slant, italic, grade, or a custom axis (a four-letter uppercase tag,
+  e.g. SERF). Existing masters are placed at a value you choose on the new
+  axis; add a master elsewhere on it (e.g. Condensed at width 75) to use it.
+  An axis only goes into the font once masters differ along it. Each axis
+  shows where the masters sit, and the masters table moves them. An axis can
+  be removed while no two masters differ only along it.
+- **Default master:** what the font shows when no style is chosen.
+- **Missing corners:** with two or more axes, extremes with no master (e.g.
+  Bold Condensed when there's a Bold and a Condensed) are listed. The font
+  still works there, adding up the neighbouring changes, but drawing that
+  master gives you control over it.
 - **Named instances:** the in-between styles apps list by name (Medium 500,
-  SemiBold 600, and so on). Edit, add or remove them.
-- **Interpolation preview:** a weight slider (and one button per instance)
-  showing the real variable font, shaped by HarfBuzz.
+  SemiBold 600, and so on), with a value on each axis. Edit, add or remove
+  them.
+- **Interpolation preview:** one slider per axis (and one button per
+  instance) showing the real variable font, shaped by HarfBuzz.
 - **Compatibility:** weights interpolate point by point, so every glyph needs
   the same contours, segments, segment kinds (straight or curved), start
   points and anchors in every weight. Mismatches are reported in plain
@@ -298,9 +311,9 @@ ligatures and alternates → compile → RTL preview, plus project handling
 trip (folder watcher, Edit in Illustrator).
 
 Next:
-- Variable fonts (Phase 2): weight axis, compatibility checks, point order
-  fixes and variable export are done; next are multiple axes (width, optical
-  size, slant, custom)
+- Variable fonts (Phase 2): axes (weight, width, optical size, slant,
+  italic, grade, custom), compatibility checks, point order fixes and
+  variable export are done
 - Bilingual/multilingual fonts, Hebrew + Latin first (Phase 3, the end
   goal; see the brief)
 

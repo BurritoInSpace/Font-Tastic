@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, type CompatReport, type Project, type VariableSetup } from '../api'
+import { api, type AxisRange, type CompatReport, type Project, type VariableSetup } from '../api'
+import { describeLocation, type Location } from '../axes'
 import { ShapingFont } from '../shaping'
 import { CommitInput } from './GlyphEditor'
 
@@ -17,32 +18,16 @@ interface Props {
 
 const SEVERITY_LABEL = { error: 'Needs redrawing', fixable: 'Fixable in the app', warning: 'May look off in between' }
 
-/** The Variable tab: weight axis, named instances, a live interpolation preview and the compatibility report. */
+/** The Variable tab: axes and masters, named instances, a live interpolation preview and the compatibility report. */
 export function VariablePanel({ project, compat, onOpenGlyph, onNewWeight, onError, onProject, onCompat, onMessage }: Props) {
   const [setup, setSetup] = useState<VariableSetup | null>(null)
 
   useEffect(() => {
     api.variable().then(setSetup).catch((e) => onError(String(e)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.revision, project.weights.length])
+  }, [project.revision, project.weights.length, project.axes.length])
 
   if (!setup) return null
-  if (!setup.available) {
-    return (
-      <div className="panel-page">
-        <div className="panel light">
-          <h2>Variable font</h2>
-          <p>
-            A variable font holds a whole range of weights in one file, interpolated from the weights you draw. It needs
-            at least two weights, e.g. a Light and a Bold, drawn with the same points.
-          </p>
-          <div className="row">
-            <button className="primary" onClick={onNewWeight}>+ New weight…</button>
-          </div>
-        </div>
-      </div>
-    )
-  }
 
   const save = async (values: Parameters<typeof api.setVariable>[0]) => {
     try {
@@ -51,75 +36,53 @@ export function VariablePanel({ project, compat, onOpenGlyph, onNewWeight, onErr
       onError(String(e))
     }
   }
+  /** Run an axis/master change; the server answers with the new project and setup. */
+  const change = async (action: () => Promise<{ project: Project; variable: VariableSetup }>) => {
+    try {
+      const res = await action()
+      onProject(res.project)
+      setSetup(res.variable)
+      return true
+    } catch (e) {
+      onError(String(e))
+      return false
+    }
+  }
+
+  const axesCard = (
+    <AxesCard setup={setup} change={change} onNewWeight={onNewWeight} onDefault={(d) => void save({ default: d })} />
+  )
+
+  if (!setup.available) {
+    return (
+      <div className="panel-page">
+        <div className="panel light">
+          <h2>Variable font</h2>
+          <p>
+            A variable font holds a whole range of styles in one file, interpolated from the masters you draw: a Light
+            and a Bold for a weight range, a Condensed and a Regular for width, and so on. It needs at least two
+            masters, drawn with the same points.
+          </p>
+          <div className="row">
+            <button className="primary" onClick={onNewWeight}>+ New master…</button>
+          </div>
+        </div>
+        {axesCard}
+      </div>
+    )
+  }
 
   return (
     <div className="variable-layout">
       <div className="kerning-main">
         <VariablePreview project={project} setup={setup} />
-
-        <div className="card light">
-          <h2>Weight axis</h2>
-          <p className="muted small">
-            Each weight sits on the axis at its weight class. The default weight is what the font shows when no weight
-            is chosen.
-          </p>
-          <div className="axis">
-            {setup.masters!.map((m) => (
-              <div key={m.name} className="axis-stop" style={{ left: `${pct(setup, m.weight)}%` }}>
-                <span className="axis-dot" />
-                <span>{m.name}</span>
-                <span className="muted small">{m.weight}</span>
-              </div>
-            ))}
-          </div>
-          <div className="row">
-            <label className="muted" htmlFor="default-weight">Default weight</label>
-            <select id="default-weight" value={setup.default} onChange={(e) => void save({ default: e.target.value })}>
-              {setup.masters!.map((m) => <option key={m.name} value={m.name}>{m.name} · {m.weight}</option>)}
-            </select>
-            <span className="spacer" />
-            <button onClick={onNewWeight}>+ New weight…</button>
-          </div>
-        </div>
-
-        <div className="card light">
-          <h2>Named instances</h2>
-          <p className="muted small">
-            In-between styles that apps list by name (e.g. Medium at 500). Any weight from {setup.min} to {setup.max} works.
-          </p>
-          <table className="rules">
-            <tbody>
-              {setup.instances!.map((inst, i) => (
-                <tr key={`${inst.name}-${i}`}>
-                  <td>
-                    <CommitInput value={inst.name} onCommit={(v) => void save({
-                      instances: setup.instances!.map((x, j) => (j === i ? { ...x, name: v.trim() } : x)),
-                    })} />
-                  </td>
-                  <td className="num-cell">
-                    <CommitInput value={String(inst.weight)} numeric onCommit={(v) => void save({
-                      instances: setup.instances!.map((x, j) => (j === i ? { ...x, weight: Math.round(Number(v)) } : x)),
-                    })} />
-                  </td>
-                  <td>
-                    <button className="icon" title="Remove instance"
-                      onClick={() => void save({ instances: setup.instances!.filter((_, j) => j !== i) })}>×</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="row">
-            <button onClick={() => void save({
-              instances: [...setup.instances!, { name: 'New', weight: Math.round((setup.min! + setup.max!) / 2) }],
-            })}>+ Add instance</button>
-          </div>
-        </div>
+        {axesCard}
+        <InstancesCard setup={setup} save={save} />
       </div>
 
       <aside className="side-panel light">
         <h4>Compatibility</h4>
-        <CompatReportView compat={compat} onOpenGlyph={onOpenGlyph} defaultWeight={setup.default!}
+        <CompatReportView compat={compat} onOpenGlyph={onOpenGlyph} defaultWeight={setup.default}
           onFixAll={async () => {
             try {
               const res = await api.fixAll()
@@ -148,16 +111,222 @@ export function VariablePanel({ project, compat, onOpenGlyph, onNewWeight, onErr
   )
 }
 
-function pct(setup: VariableSetup, weight: number) {
-  const span = setup.max! - setup.min! || 1
-  return ((weight - setup.min!) / span) * 100
+const pct = (a: AxisRange, value: number) => ((value - a.min) / (a.max - a.min || 1)) * 100
+const withUnit = (a: { unit: string }, v: number) => `${v}${a.unit === '%' || a.unit === '°' ? a.unit : a.unit ? ` ${a.unit}` : ''}`
+
+/** The axes, where every master sits on them, and the default master. */
+function AxesCard({ setup, change, onNewWeight, onDefault }: {
+  setup: VariableSetup
+  change: (action: () => Promise<{ project: Project; variable: VariableSetup }>) => Promise<boolean>
+  onNewWeight: () => void
+  onDefault: (name: string) => void
+}) {
+  const [adding, setAdding] = useState(false)
+  return (
+    <div className="card light">
+      <div className="row">
+        <h2 className="grow">Axes</h2>
+        {!adding && <button onClick={() => setAdding(true)}>+ Add axis</button>}
+      </div>
+      <p className="muted small">
+        Every master sits at a place on each axis. An axis goes into the font once masters differ along it.
+      </p>
+
+      {setup.axes.map((a) => {
+        // masters at the same value share one stop
+        const stops = new Map<number, string[]>()
+        for (const m of setup.masters) stops.set(m.location[a.tag], [...(stops.get(m.location[a.tag]) ?? []), m.name])
+        return (
+          <div key={a.tag} className="axis-block">
+            <div className="row">
+              <strong>{a.name}</strong>
+              <span className="muted small mono">{a.tag}</span>
+              <span className="muted small grow">
+                {a.active
+                  ? `${withUnit(a, a.min)} to ${withUnit(a, a.max)}, default ${withUnit(a, a.default)}`
+                  : `Every master is at ${withUnit(a, a.default)}. Add a master elsewhere on it to use it.`}
+              </span>
+              {a.tag !== 'wght' && (
+                <button className="icon" title={`Remove the ${a.name} axis`}
+                  onClick={() => void change(() => api.deleteAxis(a.tag))}>×</button>
+              )}
+            </div>
+            {a.active && (
+              <div className="axis">
+                {[...stops].map(([value, names]) => (
+                  <div key={value} style={{ left: `${pct(a, value)}%` }}
+                    className={`axis-stop${value === a.default ? ' default' : ''}${value === a.min ? ' start' : value === a.max ? ' end' : ''}`}>
+                    <span className="axis-dot" />
+                    {names.map((n) => <span key={n}>{n}</span>)}
+                    <span className="muted small">{value}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {adding && (
+        <AddAxisForm setup={setup} onCancel={() => setAdding(false)}
+          onAdd={async (tag, name, value) => {
+            if (await change(() => api.addAxis(tag, name, value))) setAdding(false)
+          }} />
+      )}
+
+      {setup.missingCorners.length > 0 && (
+        <p className="hint warn">
+          No master drawn at {setup.missingCorners.map((c) => describeLocation(setup.axes, c)).join('; ')}. The font
+          adds up the changes of the masters around it there, which can look off; add a master there if it does.
+        </p>
+      )}
+
+      <h4>Masters</h4>
+      <table className="rules masters-table">
+        <thead>
+          <tr>
+            <th />
+            {setup.axes.map((a) => <th key={a.tag}>{a.name}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {setup.masters.map((m) => (
+            <tr key={m.name}>
+              <td><strong>{m.name}</strong>{m.name === setup.default && <span className="muted small"> · default</span>}</td>
+              {setup.axes.map((a) => (
+                <td key={a.tag} className="num-cell">
+                  <CommitInput value={String(m.location[a.tag])} numeric
+                    onCommit={(v) => void change(() => api.moveMaster(m.name, { [a.tag]: Number(v) }))} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="row">
+        <label className="muted" htmlFor="default-weight">Default master</label>
+        <select id="default-weight" value={setup.default} onChange={(e) => onDefault(e.target.value)}
+          title="What the font shows when no style is chosen">
+          {setup.masters.map((m) => (
+            <option key={m.name} value={m.name}>{m.name} · {describeLocation(setup.axes, m.location)}</option>
+          ))}
+        </select>
+        <span className="spacer" />
+        <button onClick={onNewWeight}>+ New master…</button>
+      </div>
+    </div>
+  )
 }
 
-/** The variable font rendered by HarfBuzz at any weight along the axis. */
+function AddAxisForm({ setup, onCancel, onAdd }: {
+  setup: VariableSetup
+  onCancel: () => void
+  onAdd: (tag: string, name: string, value: number) => void
+}) {
+  const free = Object.keys(setup.presets).filter((t) => !setup.axes.some((a) => a.tag === t))
+  const [choice, setChoice] = useState(free[0] ?? 'custom')
+  const [tag, setTag] = useState('')
+  const [name, setName] = useState('')
+  const preset = setup.presets[choice]
+  const [value, setValue] = useState(preset?.default ?? 0)
+  const pick = (c: string) => {
+    setChoice(c)
+    setValue(setup.presets[c]?.default ?? 0)
+  }
+  const custom = choice === 'custom'
+  return (
+    <div className="add-axis">
+      <div className="row">
+        <select value={choice} onChange={(e) => pick(e.target.value)} aria-label="Axis">
+          {free.map((t) => <option key={t} value={t}>{setup.presets[t].name} ({t})</option>)}
+          <option value="custom">Custom axis…</option>
+        </select>
+        {custom && (
+          <>
+            <input className="tag-input" value={tag} maxLength={4} placeholder="TAG" aria-label="Tag"
+              onChange={(e) => setTag(e.target.value.toUpperCase())} />
+            <input value={name} placeholder="Name, e.g. Serif" aria-label="Name" onChange={(e) => setName(e.target.value)} />
+          </>
+        )}
+      </div>
+      <p className="muted small">
+        {custom
+          ? 'A custom axis has a four-letter uppercase tag of your choosing (e.g. SERF for serif length).'
+          : preset.about}
+      </p>
+      <div className="row">
+        <label className="muted" htmlFor="axis-value">Existing masters are at</label>
+        <input id="axis-value" type="number" step="any" className="num" value={value}
+          onChange={(e) => setValue(Number(e.target.value))} />
+        {preset?.unit && <span className="muted small">{preset.unit}</span>}
+        <span className="spacer" />
+        <button onClick={onCancel}>Cancel</button>
+        <button className="primary" disabled={custom && (tag.length !== 4 || !name.trim())}
+          onClick={() => onAdd(custom ? tag : choice, custom ? name.trim() : '', value)}>
+          Add axis
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function InstancesCard({ setup, save }: {
+  setup: VariableSetup
+  save: (values: Parameters<typeof api.setVariable>[0]) => Promise<void>
+}) {
+  const active = setup.axes.filter((a) => a.active)
+  const defaultLocation = setup.masters.find((m) => m.name === setup.default)?.location ?? {}
+  const setInstance = (i: number, patch: { name?: string; location?: Location }) => void save({
+    instances: setup.instances.map((x, j) => (j === i ? { ...x, ...patch, location: { ...x.location, ...patch.location } } : x)),
+  })
+  return (
+    <div className="card light">
+      <h2>Named instances</h2>
+      <p className="muted small">
+        In-between styles that apps list by name (e.g. Medium at weight 500), anywhere inside the masters' range.
+      </p>
+      <table className="rules instances-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            {active.map((a) => <th key={a.tag} className="num-cell">{a.name}</th>)}
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {setup.instances.map((inst, i) => (
+            <tr key={`${inst.name}-${i}`}>
+              <td><CommitInput value={inst.name} onCommit={(v) => setInstance(i, { name: v.trim() })} /></td>
+              {active.map((a) => (
+                <td key={a.tag} className="num-cell">
+                  <CommitInput value={String(inst.location[a.tag])} numeric
+                    onCommit={(v) => setInstance(i, { location: { [a.tag]: Number(v) } })} />
+                </td>
+              ))}
+              <td>
+                <button className="icon" title="Remove instance"
+                  onClick={() => void save({ instances: setup.instances.filter((_, j) => j !== i) })}>×</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="row">
+        <button onClick={() => void save({ instances: [...setup.instances, { name: 'New', location: { ...defaultLocation } }] })}>
+          + Add instance
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** The variable font rendered by HarfBuzz anywhere on the axes: one slider per axis. */
 function VariablePreview({ project, setup }: { project: Project; setup: VariableSetup }) {
+  const active = setup.axes.filter((a) => a.active)
   const [font, setFont] = useState<ShapingFont | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [weight, setWeight] = useState(() => setup.masters!.find((m) => m.name === setup.default)?.weight ?? setup.min!)
+  const [location, setLocation] = useState<Location>(
+    () => setup.masters.find((m) => m.name === setup.default)?.location ?? {})
   const [text, setText] = useState(() => project.settings.previewText?.split('\n')[0] ?? 'שָׁלוֹם בַּת אל')
 
   useEffect(() => {
@@ -177,19 +346,17 @@ function VariablePreview({ project, setup }: { project: Project; setup: Variable
 
   const run = useMemo(() => {
     if (!font) return null
-    font.setVariations({ wght: weight })
+    font.setVariations(Object.fromEntries(active.map((a) => [a.tag, location[a.tag] ?? a.default])))
     return font.shape(text, { kern: true, mark: true, liga: true })
-  }, [font, weight, text])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [font, location, text, setup])
 
+  const at = (a: AxisRange) => Math.min(a.max, Math.max(a.min, location[a.tag] ?? a.default))
   const { ascender, descender } = project.info
   const lineHeight = ascender - descender
   return (
     <div className="card light">
-      <div className="row">
-        <h2>Interpolation preview</h2>
-        <span className="spacer" />
-        <strong className="weight-readout">{Math.round(weight)}</strong>
-      </div>
+      <h2>Interpolation preview</h2>
       <div className="variable-preview">
         {error ? <div className="compile-error">{error}</div> : run && (
           <svg viewBox={`-20 ${-ascender} ${run.width + 40} ${lineHeight}`} preserveAspectRatio="xMaxYMid meet">
@@ -199,17 +366,29 @@ function VariablePreview({ project, setup }: { project: Project; setup: Variable
           </svg>
         )}
       </div>
-      <input type="range" min={setup.min} max={setup.max} value={weight} onChange={(e) => setWeight(Number(e.target.value))}
-        aria-label="Weight" className="weight-slider" />
+      {active.map((a) => (
+        <div key={a.tag} className="axis-slider">
+          <span className="axis-slider-name">{a.name}</span>
+          <input type="range" min={a.min} max={a.max} step={a.max - a.min <= 2 ? 0.01 : a.max - a.min <= 50 ? 0.1 : 1}
+            value={at(a)} aria-label={a.name} className="weight-slider"
+            onChange={(e) => setLocation({ ...location, [a.tag]: Number(e.target.value) })} />
+          <strong className="weight-readout">{Math.round(at(a) * 10) / 10}</strong>
+        </div>
+      ))}
       <div className="row">
-        {setup.instances!.map((i) => (
-          <button key={`${i.name}${i.weight}`} className={`toggle ${Math.round(weight) === i.weight ? 'on' : 'off'}`}
-            onClick={() => setWeight(i.weight)}>{i.name}</button>
-        ))}
+        {setup.instances.map((i) => {
+          const on = active.every((a) => Math.abs(at(a) - i.location[a.tag]) < 0.05)
+          return (
+            <button key={`${i.name}${describeLocation(setup.axes, i.location)}`} className={`toggle ${on ? 'on' : 'off'}`}
+              title={describeLocation(setup.axes, i.location)} onClick={() => setLocation({ ...i.location })}>
+              {i.name}
+            </button>
+          )
+        })}
         <span className="spacer" />
         <input dir="rtl" value={text} onChange={(e) => setText(e.target.value)} aria-label="Preview text" />
       </div>
-      <p className="hint">Glyphs that don't match across weights yet are shown at the default weight.</p>
+      <p className="hint">Glyphs that don't match across masters yet are shown at the default master.</p>
     </div>
   )
 }

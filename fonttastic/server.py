@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import illustrator, recent, variable
+from . import axes, illustrator, recent, variable
 from .build import CompileCache, CompileError, compile_otf, compile_ttf
 from .project import NeedsConversion, Project, ProjectError, glyph_preview
 from .watcher import GlyphWatcher
@@ -110,8 +110,20 @@ class PointOrderRequest(BaseModel):
 
 class NewWeightRequest(BaseModel):
     name: str
-    weight: int
+    weight: int | None = None
     copyFrom: str
+    location: dict[str, float] | None = None  # axis tag -> value; axes left out stay where copyFrom is
+
+
+class AxisRequest(BaseModel):
+    tag: str
+    name: str = ""
+    value: float | None = None  # where the existing masters sit on it
+
+
+class MasterLocationRequest(BaseModel):
+    name: str
+    location: dict[str, float]
 
 
 class WeightRequest(BaseModel):
@@ -427,8 +439,28 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
     @app.post("/api/weights")
     def add_weight(req: NewWeightRequest):
         project = state.require()
-        guard(project.add_weight, req.name.strip(), req.weight, req.copyFrom)
+        guard(project.add_weight, req.name.strip(), req.weight, req.copyFrom, req.location)
         return weight_changed(project)
+
+    @app.post("/api/weights/location")
+    def move_master(req: MasterLocationRequest):
+        project = state.require()
+        guard(project.set_master_location, req.name, req.location)
+        return {"project": project.summary(), "variable": variable_setup(project)}
+
+    @app.post("/api/axes")
+    def add_axis(req: AxisRequest):
+        project = state.require()
+        preset = axes.PRESETS.get(req.tag.strip(), {})
+        value = req.value if req.value is not None else preset.get("default", 0)
+        guard(project.add_axis, req.tag, req.name, value)
+        return {"project": project.summary(), "variable": variable_setup(project)}
+
+    @app.post("/api/axes/delete")
+    def delete_axis(req: AxisRequest):
+        project = state.require()
+        guard(project.remove_axis, req.tag)
+        return {"project": project.summary(), "variable": variable_setup(project)}
 
     @app.post("/api/weights/switch")
     def switch_weight(req: WeightRequest):
@@ -444,18 +476,19 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
 
     # -- variable font ------------------------------------------------------
 
+    def variable_setup(project):
+        """Axes, masters and instances; ``available`` once there are two masters."""
+        return {"available": len(project.weights) > 1, "presets": axes.PRESETS, **variable.settings(project)}
+
     @app.get("/api/variable")
     def get_variable():
-        project = state.require()
-        if len(project.weights) < 2:
-            return {"available": False}
-        return {"available": True, **variable.settings(project)}
+        return variable_setup(state.require())
 
     @app.put("/api/variable")
     def put_variable(req: VariableRequest):
         project = state.require()
         guard(variable.save_settings, project, req.default, req.instances)
-        return {"available": True, **variable.settings(project)}
+        return variable_setup(project)
 
     preview_cache: dict = {}
 

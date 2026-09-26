@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, readBase64, type ChangeEvent, type CompatReport, type ImportReport, type Project } from './api'
 import { logo, tabIcons } from './assets'
+import { describeLocation } from './axes'
 import { GlyphEditor } from './components/GlyphEditor'
 import { GlyphGrid } from './components/GlyphGrid'
 import { HomeScreen } from './components/HomeScreen'
@@ -183,10 +184,12 @@ export default function App() {
         <img className="topbar-logo" src={logo} alt="Font-tastic" />
         <div className="topbar-title">
           <div className="font-name" title={project.file}>{project.name}</div>
-          <select className="weight-menu" value={project.weight} title="Weight being edited"
+          <select className="weight-menu" value={project.weight} title="Master being edited"
             onChange={(e) => e.target.value === '+new' ? setNewWeight(true) : void switchWeight(e.target.value)}>
-            {project.weights.map((w) => <option key={w.name} value={w.name}>{w.name} · {w.weight}</option>)}
-            <option value="+new">+ New weight…</option>
+            {project.weights.map((w) => (
+              <option key={w.name} value={w.name}>{w.name} · {describeLocation(project.axes, w.location)}</option>
+            ))}
+            <option value="+new">+ New master…</option>
           </select>
         </div>
         <nav className="tabs">

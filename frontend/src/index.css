@@ -520,3 +520,27 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .contours .contour-actions { text-align: right; white-space: nowrap; }
 .inspector .row > h4.grow { margin: 0; }
 .compat-list li .row .link { text-align: left; }
+
+/* Axes (variable tab) */
+.axis-block { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-bottom: 1px solid rgba(0, 0, 0, 0.08); }
+.axis-block .axis { margin-top: 14px; }
+.axis-stop.default .axis-dot { background: var(--ft-blue); }
+.add-axis { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: rgba(0, 0, 0, 0.04); }
+.add-axis .tag-input { width: 70px; font-family: ui-monospace, Consolas, monospace; text-transform: uppercase; }
+.add-axis input.num { width: 90px; }
+.masters-table th { text-align: left; font-size: 11px; font-weight: 600; color: var(--fg-muted); padding: 2px 4px; }
+.axis-slider { display: grid; grid-template-columns: 110px minmax(0, 1fr) 64px; align-items: center; gap: 10px; }
+.axis-slider-name { font-size: 13px; }
+.axis-slider .weight-readout { font-size: 18px; text-align: right; }
+.axis-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.new-weight-body .axis-fields label input, .new-weight-body .axis-fields label select { width: 100%; }
+.hint.warn { color: #9a5a00; }
+.axis-block .axis { height: 80px; }
+.axis-stop.start { transform: translateX(-8px); align-items: flex-start; }
+.axis-stop.end { transform: translateX(calc(-100% + 8px)); align-items: flex-end; }
+.axis-block .axis { margin: 14px 8px 0; }
+.masters-table th:not(:first-child) { text-align: right; }
+.rules.instances-table, .rules.masters-table { width: auto; align-self: flex-start; }
+.masters-table td.num-cell input { width: 80px; }
+.instances-table th.num-cell { text-align: right; }
+.instances-table td.num-cell input { width: 80px; }

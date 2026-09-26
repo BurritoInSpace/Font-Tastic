@@ -32,7 +32,7 @@ import re
 import shutil
 import threading
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -40,7 +40,8 @@ import ufoLib2
 from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.svgPathPen import SVGPathPen
 
-from . import features, hebrew, naming, resequence
+from . import axes, features, hebrew, naming, resequence
+from .errors import ProjectError
 from .svg_import import outline_to_svg, parse_svg, read_svg
 
 LIB = "com.fonttastic"
@@ -75,16 +76,20 @@ GROUP_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")  # must survive as a f
 KERN_SIDES = (1, 2)
 
 
-class ProjectError(Exception):
-    code = "error"
-
-
 @dataclass
 class Weight:
+    """A master: one drawing of the whole font, at one location on the axes.
+    (Called a weight because weight is the axis every project has.)"""
+
     name: str  # style name, e.g. "Bold"; also its folder / UFO name
-    weight: int  # OpenType usWeightClass, 1-1000
+    weight: int  # OpenType usWeightClass, 1-1000; always the same as location["wght"]
     glyphs: str  # SVG folder, relative to the project file
     font: str  # UFO, relative to the project file
+    location: dict = field(default_factory=dict)  # axis tag -> value, e.g. {"wght": 700, "wdth": 75}
+
+    def __post_init__(self):
+        self.location = {"wght": self.weight, **self.location}
+        self.weight = round(self.location["wght"])
 
 
 class NeedsConversion(ProjectError):
@@ -109,12 +114,14 @@ def _file_name(name: str) -> str:
     return (cleaned or "Untitled") + PROJECT_SUFFIX
 
 
-def _write_project_file(path: Path, name: str, weights: list[Weight], settings: dict | None = None):
+def _write_project_file(path: Path, name: str, weights: list[Weight], settings: dict | None = None,
+                        axis_list: list[dict] | None = None):
     data = {
         "format": PROJECT_FORMAT,
         "version": PROJECT_VERSION,
         "name": name,
         "paths": {"build": DEFAULT_PATHS["build"], "snapshots": DEFAULT_PATHS["snapshots"]},
+        "axes": axis_list or axes.DEFAULT_AXES,
         "weights": [asdict(w) for w in weights],
         "settings": settings or {},
     }
@@ -171,6 +178,11 @@ class Project:
             self.weights = [Weight(**w) for w in data["weights"]]
         else:  # version 1: one weight in glyphs/ + font.ufo
             self.weights = [_single_weight(self.root, self._paths["glyphs"], self._paths["font"])]
+        self.axes: list[dict] = data.get("axes") or [dict(a) for a in axes.DEFAULT_AXES]
+        for w in self.weights:  # an axis added by a newer version, or a hand edit: put masters at its default
+            for a in self.axes:
+                w.location.setdefault(a["tag"], axes.PRESETS.get(a["tag"], {}).get("default", 0))
+        self._sort_weights()
         current = self.settings.get("currentWeight")
         self._activate(next((w for w in self.weights if w.name == current), self.weights[0]))
 
@@ -227,7 +239,80 @@ class Project:
         return len(self.weights) == 1 and self.weights[0].glyphs == DEFAULT_PATHS["glyphs"]
 
     def _save_project_file(self):
-        _write_project_file(self.file, self.name, self.weights, self.settings)
+        _write_project_file(self.file, self.name, self.weights, self.settings, self.axes)
+
+    def _sort_weights(self):
+        """Masters in axis order: by weight, then by the next axis, and so on."""
+        self.weights.sort(key=lambda w: tuple(w.location.get(a["tag"], 0) for a in self.axes))
+
+    def _location_key(self, location: dict) -> tuple:
+        return tuple(location.get(a["tag"]) for a in self.axes)
+
+    def _check_location(self, location: dict, ignore: Weight | None = None) -> dict:
+        """A complete, valid location on the project's axes."""
+        out = {}
+        for a in self.axes:
+            if a["tag"] not in location:
+                raise ProjectError(f"Missing a value for {a['name']}")
+            out[a["tag"]] = axes.check_value(a["tag"], a["name"], location[a["tag"]])
+        for w in self.weights:
+            if w is not ignore and self._location_key(w.location) == self._location_key(out):
+                raise ProjectError(f"{w.name} is already at {axes.describe(self.axes, out)}")
+        return out
+
+    def _set_location(self, weight: Weight, location: dict):
+        weight.location = location
+        weight.weight = round(location["wght"])
+        with self._in_weight(weight):
+            axes.apply_to_info(self.font.info, location)
+            self.font.save(self.ufo_path, overwrite=True)
+
+    # -- axes -------------------------------------------------------------------
+
+    def add_axis(self, tag: str, name: str, value) -> dict:
+        """Start varying along another axis. Every existing master is placed at
+        ``value`` on it; add a master somewhere else on it to use it."""
+        with self.lock:
+            tag, name = axes.check_new_axis(tag, name, self.axes)
+            value = axes.check_value(tag, name, value)
+            self.axes.append({"tag": tag, "name": name})
+            for w in self.weights:
+                self._set_location(w, {**w.location, tag: value})
+            self._save_project_file()
+            self.revision += 1
+            return {"tag": tag, "name": name}
+
+    def remove_axis(self, tag: str):
+        """Stop varying along an axis. Only possible while no two masters would
+        end up in the same place without it."""
+        with self.lock:
+            if tag == "wght":
+                raise ProjectError("Weight is always an axis")
+            axis = next((a for a in self.axes if a["tag"] == tag), None)
+            if axis is None:
+                raise ProjectError(f"There's no {tag} axis")
+            rest = [a for a in self.axes if a is not axis]
+            seen: dict[tuple, str] = {}
+            for w in self.weights:
+                key = tuple(w.location.get(a["tag"]) for a in rest)
+                if key in seen:
+                    raise ProjectError(
+                        f"{seen[key]} and {w.name} differ only in {axis['name']}; delete one of them first")
+                seen[key] = w.name
+            self.axes = rest
+            for w in self.weights:
+                self._set_location(w, {k: v for k, v in w.location.items() if k != tag})
+            self._save_project_file()
+            self.revision += 1
+
+    def set_master_location(self, name: str, location: dict):
+        """Move a master on the axes (its drawings stay as they are)."""
+        with self.lock:
+            weight = self.weight_by_name(name)
+            self._set_location(weight, self._check_location({**weight.location, **location}, ignore=weight))
+            self._sort_weights()
+            self._save_project_file()
+            self.revision += 1
 
     def switch_weight(self, name: str):
         with self.lock:
@@ -260,23 +345,27 @@ class Project:
                 total["errors"].update({label(f): e for f, e in report["errors"].items()})
             return total
 
-    def add_weight(self, name: str, weight_class: int, copy_from: str) -> Weight:
-        """Add a weight as a copy of an existing one (its SVGs, anchors, widths
-        and kerning), to be redrawn heavier or lighter. The first extra weight
-        moves the current one into the folder-per-weight layout."""
+    def add_weight(self, name: str, weight_class: int | None, copy_from: str, location: dict | None = None) -> Weight:
+        """Add a master as a copy of an existing one (its SVGs, anchors, widths
+        and kerning), to be redrawn heavier, narrower... It goes at ``location``
+        (any axis left out stays where the copied master is), with
+        ``weight_class`` as its weight. The first extra master moves the
+        current one into the folder-per-master layout."""
         if not WEIGHT_NAME.match(name):
             raise ProjectError(f"{name!r}: use letters, digits, - or _ (it's also a folder name)")
-        if not isinstance(weight_class, int) or not 1 <= weight_class <= 1000:
+        if weight_class is not None and (not isinstance(weight_class, int) or not 1 <= weight_class <= 1000):
             raise ProjectError("The weight must be between 1 and 1000")
         with self.lock:
             if any(w.name.lower() == name.lower() for w in self.weights):
-                raise ProjectError(f"There is already a weight called {name}")
-            if any(w.weight == weight_class for w in self.weights):
-                raise ProjectError(f"There is already a weight at {weight_class}")
+                raise ProjectError(f"There is already a master called {name}")
             source = self.weight_by_name(copy_from)
+            wanted = {**source.location, **(location or {})}
+            if weight_class is not None:
+                wanted["wght"] = weight_class
+            wanted = self._check_location(wanted)
             if self.flat_layout:
                 self._move_to_folders()
-            new = Weight(name, weight_class, f"glyphs/{name}", f"masters/{name}.ufo")
+            new = Weight(name, wanted["wght"], f"glyphs/{name}", f"masters/{name}.ufo", wanted)
             glyphs_to, ufo_to = self.root / new.glyphs, self.root / new.font
             if (glyphs_to.exists() and any(glyphs_to.iterdir())) or ufo_to.exists():
                 raise ProjectError(f"{new.glyphs} or {new.font} already exists")
@@ -289,10 +378,10 @@ class Project:
                 shutil.copytree(self.ufo_path, ufo_to)
             font = ufoLib2.Font.open(ufo_to, lazy=False)
             font.info.styleName = name
-            font.info.openTypeOS2WeightClass = weight_class
+            axes.apply_to_info(font.info, wanted)
             font.save(ufo_to, overwrite=True)
             self.weights.append(new)
-            self.weights.sort(key=lambda w: w.weight)
+            self._sort_weights()
             self.switch_weight(name)
             return new
 
@@ -333,10 +422,10 @@ class Project:
                 self.revision += 1
 
     def weight_fonts(self) -> list[tuple[str, object]]:
-        """(name, font) for every weight, lightest first; the active weight is
-        the live in-memory font, the others are read from disk."""
+        """(name, font) for every master, in axis order; the active one is the
+        live in-memory font, the others are read from disk."""
         out = []
-        for w in sorted(self.weights, key=lambda w: w.weight):
+        for w in self.weights:
             if w is self.active:
                 out.append((w.name, self.font))
             elif (self.root / w.font).exists():
@@ -412,7 +501,7 @@ class Project:
         info = font.info
         info.familyName = self.name
         info.styleName = weight.name
-        info.openTypeOS2WeightClass = weight.weight
+        axes.apply_to_info(info, weight.location)
         for key, value in DEFAULT_INFO.items():
             setattr(info, key, value)
         return font
@@ -1185,8 +1274,10 @@ class Project:
                 "settings": self.settings,
                 "revision": self.revision,
                 "weight": self.active.name,
+                "axes": self.axes,
                 "weights": [
-                    {"name": w.name, "weight": w.weight, "glyphs": w.glyphs, "active": w is self.active}
+                    {"name": w.name, "weight": w.weight, "location": w.location, "glyphs": w.glyphs,
+                     "active": w is self.active}
                     for w in self.weights
                 ],
                 "flatLayout": self.flat_layout,

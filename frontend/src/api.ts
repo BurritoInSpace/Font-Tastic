@@ -66,10 +66,19 @@ export interface ProjectSettings {
   opticalGap?: Record<'1' | '2', GapMarker>
 }
 
+/** An axis the project varies along. */
+export interface AxisDef {
+  tag: string
+  name: string
+}
+
+/** A master ("weight"): one drawing of the font at one location on the axes. */
 export interface WeightInfo {
   name: string
-  /** OpenType weight class, 1-1000 */
+  /** OpenType weight class, 1-1000 (the same as location.wght) */
   weight: number
+  /** axis tag -> value */
+  location: Record<string, number>
   /** SVG folder, relative to the project */
   glyphs: string
   active: boolean
@@ -80,6 +89,7 @@ export interface Project {
   /** the weight being edited */
   weight: string
   weights: WeightInfo[]
+  axes: AxisDef[]
   /** single weight still directly in glyphs/ + font.ufo (moves to glyphs/<Weight>/ when a second is added) */
   flatLayout: boolean
   /** the .fonttastic file */
@@ -130,13 +140,40 @@ export interface CompatReport {
   warnings: number
 }
 
+/** An axis with the range its masters span. Inactive: every master is at the same value, so it isn't in the font yet. */
+export interface AxisRange extends AxisDef {
+  unit: string
+  min: number
+  default: number
+  max: number
+  active: boolean
+}
+
+export interface AxisPreset {
+  name: string
+  min: number
+  max: number
+  default: number
+  unit: string
+  about: string
+}
+
+export interface VariableInstance {
+  name: string
+  location: Record<string, number>
+}
+
 export interface VariableSetup {
+  /** two or more masters */
   available: boolean
-  default?: string
-  min?: number
-  max?: number
-  masters?: { name: string; weight: number }[]
-  instances?: { name: string; weight: number }[]
+  presets: Record<string, AxisPreset>
+  axes: AxisRange[]
+  /** the default master's name */
+  default: string
+  masters: { name: string; weight: number; location: Record<string, number> }[]
+  instances: VariableInstance[]
+  /** extremes of two or more axes with no master drawn there */
+  missingCorners: Record<string, number>[]
 }
 
 export interface ImportReport {
@@ -277,7 +314,7 @@ export const api = {
     call<Project>('POST', '/api/kerning/groups/delete', { side, name }),
   compat: () => call<CompatReport>('GET', '/api/compat'),
   variable: () => call<VariableSetup>('GET', '/api/variable'),
-  setVariable: (values: { default?: string; instances?: { name: string; weight: number }[] }) =>
+  setVariable: (values: { default?: string; instances?: VariableInstance[] }) =>
     call<VariableSetup>('PUT', '/api/variable', values),
   variableFont: async (): Promise<ArrayBuffer> => {
     const res = await fetch('/api/variable.otf')
@@ -289,8 +326,14 @@ export const api = {
   },
   exportFonts: (choice: { staticFormats: string[]; weights: string[] | null; variableFormats: string[] }) =>
     call<{ paths: string[]; bytes: number; variableNote: string | null }>('POST', '/api/export', choice),
-  addWeight: (name: string, weight: number, copyFrom: string) =>
-    call<{ project: Project; import: ImportReport }>('POST', '/api/weights', { name, weight, copyFrom }),
+  addWeight: (name: string, copyFrom: string, location: Record<string, number>) =>
+    call<{ project: Project; import: ImportReport }>('POST', '/api/weights', { name, copyFrom, location }),
+  moveMaster: (name: string, location: Record<string, number>) =>
+    call<{ project: Project; variable: VariableSetup }>('POST', '/api/weights/location', { name, location }),
+  addAxis: (tag: string, name: string, value: number) =>
+    call<{ project: Project; variable: VariableSetup }>('POST', '/api/axes', { tag, name, value }),
+  deleteAxis: (tag: string) =>
+    call<{ project: Project; variable: VariableSetup }>('POST', '/api/axes/delete', { tag }),
   switchWeight: (name: string) =>
     call<{ project: Project; import: ImportReport }>('POST', '/api/weights/switch', { name }),
   deleteWeight: (name: string) =>

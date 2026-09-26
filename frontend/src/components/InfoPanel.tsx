@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type FontInfo, type Project, type Snapshot } from '../api'
+import { describeLocation } from '../axes'
 import { useConfirm } from './Confirm'
 
 const FIELDS: { key: keyof FontInfo; label: string; numeric?: boolean }[] = [
@@ -70,25 +71,26 @@ export function InfoPanel({ project, onChanged, onRestored, onError, onDeleteWei
         <button className="primary" disabled={!dirty} onClick={() => void save()}>Save</button>
       </div>
 
-      <h4>Weights</h4>
+      <h4>Masters</h4>
       <p className="muted small">
-        Each weight has its own SVGs, anchors, widths and kerning. The glyph set, kerning groups, ligatures, family name
-        and vertical metrics are shared. Switch or add weights from the menu at the top left.
+        Each master (a weight, width...) has its own SVGs, anchors, widths and kerning. The glyph set, kerning groups,
+        ligatures, family name and vertical metrics are shared. Switch or add masters from the menu at the top left;
+        set up axes in the variable tab.
       </p>
       <table className="rules weights-table">
         <tbody>
           {project.weights.map((w) => (
             <tr key={w.name}>
               <td><strong>{w.name}</strong>{w.active && <span className="muted small"> · editing</span>}</td>
-              <td className="num-cell">{w.weight}</td>
+              <td className="num-cell">{describeLocation(project.axes, w.location)}</td>
               <td className="muted small mono">{w.glyphs}/</td>
               <td>
                 <button className="icon" title={`Remove ${w.name}`} disabled={project.weights.length === 1}
                   onClick={async () => {
                     if (await confirm({
-                      title: `Remove the ${w.name} weight?`,
+                      title: `Remove the ${w.name} master?`,
                       body: <p>Its SVG folder and font data are moved into <code>snapshots/removed-weights/</code>, not deleted.</p>,
-                      confirmLabel: 'Remove weight',
+                      confirmLabel: 'Remove master',
                       danger: true,
                     })) onDeleteWeight(w.name)
                   }}>×</button>

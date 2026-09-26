@@ -1,9 +1,11 @@
-"""Variable fonts: one font file with a weight axis, built from the project's weights.
+"""Variable fonts: one font file with every axis the project varies along,
+built from its masters.
 
-Each weight is a master placed on the ``wght`` axis at its weight class
-(Regular at 400, Bold at 700...). The default master is the one the font shows
-when no weight is chosen (normally Regular). Named instances are the
-in-between styles apps list by name, e.g. "Medium" at 500.
+Each master sits at a location on the axes (Regular at wght 400, Bold
+Condensed at wght 700 + wdth 75...). The default master is the one the font
+shows when nothing is chosen (normally Regular). An axis only goes into the
+font once masters differ along it. Named instances are the in-between styles
+apps list by name, e.g. "Medium" at wght 500.
 
 Two flavours are built from the same masters:
   - CFF2 (``.otf``): cubic curves exactly as drawn in Illustrator
@@ -13,50 +15,119 @@ Two flavours are built from the same masters:
 from __future__ import annotations
 
 import io
+import itertools
 
 import ufo2ft
 import ufoLib2
 from fontTools.designspaceLib import AxisDescriptor, DesignSpaceDocument, InstanceDescriptor, SourceDescriptor
 
+from . import axes as axis_info
 from .build import CompileError
 from .project import WEIGHT_NAMES, ProjectError
 
 
+def _axes(project, default_location: dict) -> list[dict]:
+    out = []
+    for a in project.axes:
+        values = [w.location[a["tag"]] for w in project.weights]
+        preset = axis_info.PRESETS.get(a["tag"], {})
+        out.append({
+            "tag": a["tag"], "name": a["name"], "unit": preset.get("unit", ""),
+            "min": min(values), "max": max(values), "default": default_location[a["tag"]],
+            "active": min(values) != max(values),
+        })
+    return out
+
+
+def _clean_instance(inst: dict, axis_list: list[dict]) -> dict:
+    """An instance with a value on every axis: old saves had just a weight;
+    axes that don't vary take their one value."""
+    location = dict(inst.get("location") or {})
+    if "weight" in inst and "wght" not in location:
+        location["wght"] = inst["weight"]
+    for a in axis_list:
+        if not a["active"] or a["tag"] not in location:
+            location[a["tag"]] = a["default"]
+    return {"name": str(inst.get("name", "")).strip(), "location": {a["tag"]: location[a["tag"]] for a in axis_list}}
+
+
+def _inside(inst: dict, axis_list: list[dict]) -> bool:
+    return all(a["min"] <= inst["location"][a["tag"]] <= a["max"] for a in axis_list)
+
+
 def settings(project) -> dict:
     """The project's variable-font setup, filled in with sensible defaults."""
-    weights = sorted(project.weights, key=lambda w: w.weight)
-    names = [w.name for w in weights]
+    masters = project.weights
     saved = project.settings.get("variable", {})
     default = saved.get("default")
-    if default not in names:
-        default = min(weights, key=lambda w: abs(w.weight - 400)).name
-    lo, hi = weights[0].weight, weights[-1].weight
+    if default not in [w.name for w in masters]:
+        # Regular-ish: nearest to 400, then nearest to every other axis's usual default
+        def distance(w):
+            others = sum(abs(w.location[a["tag"]] - axis_info.PRESETS.get(a["tag"], {}).get("default", 0))
+                         for a in project.axes if a["tag"] != "wght")
+            return (abs(w.weight - 400), others)
+        default = min(masters, key=distance).name
+    default_location = next(w.location for w in masters if w.name == default)
+    axis_list = _axes(project, default_location)
+
     instances = saved.get("instances")
-    if instances is None:  # the standard weights the axis covers
-        instances = [{"name": n, "weight": w} for w, n in sorted(WEIGHT_NAMES.items()) if lo <= w <= hi]
-    instances = [i for i in instances if lo <= i["weight"] <= hi]
+    if instances is None:
+        instances = _standard_instances(project, axis_list, default_location)
+    instances = [_clean_instance(i, axis_list) for i in instances]
+    instances = [i for i in instances if i["name"] and _inside(i, axis_list)]
+    order = [a["tag"] for a in axis_list]
     return {
+        "axes": axis_list,
         "default": default,
-        "min": lo,
-        "max": hi,
-        "masters": [{"name": w.name, "weight": w.weight} for w in weights],
-        "instances": sorted(instances, key=lambda i: i["weight"]),
+        "masters": [{"name": w.name, "weight": w.weight, "location": w.location} for w in masters],
+        "instances": sorted(instances, key=lambda i: tuple(i["location"][t] for t in order)),
+        "missingCorners": _missing_corners(project, axis_list),
     }
+
+
+def _standard_instances(project, axis_list: list[dict], default_location: dict) -> list[dict]:
+    """The usual weights along the weight axis (at the default of the other
+    axes), plus one instance per master, named after it."""
+    wght = next(a for a in axis_list if a["tag"] == "wght")
+    out = [{"name": n, "location": {**default_location, "wght": w}}
+           for w, n in sorted(WEIGHT_NAMES.items()) if wght["min"] <= w <= wght["max"]]
+    taken = {tuple(sorted(i["location"].items())) for i in out}
+    for w in project.weights:
+        if tuple(sorted(w.location.items())) not in taken:
+            out.append({"name": w.name, "location": dict(w.location)})
+    return out
+
+
+def _missing_corners(project, axis_list: list[dict]) -> list[dict]:
+    """With two or more axes, the extremes nobody drew (e.g. Bold Condensed
+    when there's a Bold and a Condensed). The font still works there, adding
+    up the changes of the masters around it, but it can look off."""
+    active = [a for a in axis_list if a["active"]]
+    if len(active) < 2:
+        return []
+    drawn = {tuple(w.location[a["tag"]] for a in active) for w in project.weights}
+    corners = itertools.product(*[(a["min"], a["max"]) for a in active])
+    return [dict(zip([a["tag"] for a in active], c)) for c in corners if c not in drawn]
 
 
 def save_settings(project, default: str | None = None, instances: list[dict] | None = None) -> dict:
     current = settings(project)
     if default is not None:
         if default not in [m["name"] for m in current["masters"]]:
-            raise ProjectError(f"No weight named {default!r}")
+            raise ProjectError(f"No master named {default!r}")
         current["default"] = default
     if instances is not None:
         cleaned = []
-        for i in instances:
-            name, weight = str(i.get("name", "")).strip(), int(i.get("weight", 0))
-            if not name or not current["min"] <= weight <= current["max"]:
-                raise ProjectError(f"Instance {name or '?'} at {weight} is outside the axis ({current['min']}-{current['max']})")
-            cleaned.append({"name": name, "weight": weight})
+        for raw in instances:
+            inst = _clean_instance(raw, current["axes"])
+            if not inst["name"]:
+                raise ProjectError("Every instance needs a name")
+            for a in current["axes"]:
+                value = inst["location"][a["tag"]]
+                if not isinstance(value, (int, float)) or not a["min"] <= value <= a["max"]:
+                    raise ProjectError(
+                        f"Instance {inst['name']}: {a['name']} {value} is outside the axis ({a['min']:g}-{a['max']:g})")
+            cleaned.append(inst)
         current["instances"] = cleaned
     project.save_settings({"variable": {"default": current["default"], "instances": current["instances"]}})
     return settings(project)
@@ -76,32 +147,33 @@ def _without(font, glyphs: set[str]):
 def designspace(project, skip_incompatible: bool = False) -> DesignSpaceDocument:
     setup = settings(project)
     if len(setup["masters"]) < 2:
-        raise ProjectError("A variable font needs at least two weights")
+        raise ProjectError("A variable font needs at least two masters")
+    active = [a for a in setup["axes"] if a["active"]]
     fonts = dict(project.weight_fonts())
     skip: set[str] = set()
     if skip_incompatible:
         report = project.compatibility()
         skip = {g for g, problems in report["glyphs"].items() if any(p["severity"] != "warning" for p in problems)}
-    default_weight = next(m["weight"] for m in setup["masters"] if m["name"] == setup["default"])
 
     doc = DesignSpaceDocument()
-    axis = AxisDescriptor()
-    axis.tag, axis.name = "wght", "Weight"
-    axis.minimum, axis.default, axis.maximum = setup["min"], default_weight, setup["max"]
-    doc.addAxis(axis)
+    for a in active:
+        axis = AxisDescriptor()
+        axis.tag, axis.name = a["tag"], a["name"]
+        axis.minimum, axis.default, axis.maximum = a["min"], a["default"], a["max"]
+        doc.addAxis(axis)
     family = project.font.info.familyName
     for m in setup["masters"]:
         src = SourceDescriptor()
         src.name = m["name"]
         src.familyName, src.styleName = family, m["name"]
-        src.location = {"Weight": m["weight"]}
+        src.location = {a["name"]: m["location"][a["tag"]] for a in active}
         font = fonts[m["name"]]
         src.font = font if (m["name"] == setup["default"] or not skip) else _without(font, skip)
         doc.addSource(src)
     for i in setup["instances"]:
         inst = InstanceDescriptor()
         inst.familyName, inst.styleName = family, i["name"]
-        inst.location = {"Weight": i["weight"]}
+        inst.location = {a["name"]: i["location"][a["tag"]] for a in active}
         doc.addInstance(inst)
     return doc
 

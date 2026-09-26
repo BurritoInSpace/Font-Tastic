@@ -136,7 +136,9 @@ contour count / point count / point order across them.
   writers generate variable GSUB/GPOS directly from per-master data rather
   than needing a separate variable-specific system.
 
-### Multiple axes (after re-sequencing)
+### Multiple axes (after re-sequencing) — done
+
+*Built as below; masters keep the name "weights" in the code and project file.*
 
 Beyond weight: width, optical size, slant/italic, and custom axes. Planned
 after the re-sequencing step (start points, contour order), which doesn't

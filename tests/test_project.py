@@ -21,7 +21,9 @@ def test_create_makes_self_contained_layout(tmp_path):
     assert (root / "glyphs").is_dir() and (root / "build").is_dir() and (root / "font.ufo").is_dir()
     data = json.loads(p.file.read_text(encoding="utf-8"))
     assert data["format"] == "fonttastic-project"
-    assert data["weights"] == [{"name": "Regular", "weight": 400, "glyphs": "glyphs", "font": "font.ufo"}]
+    assert data["weights"] == [{"name": "Regular", "weight": 400, "glyphs": "glyphs", "font": "font.ufo",
+                                "location": {"wght": 400}}]
+    assert data["axes"] == [{"tag": "wght", "name": "Weight"}]
     assert p.font.info.familyName == "My Font"
 
 
