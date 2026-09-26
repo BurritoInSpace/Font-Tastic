@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from fontTools.varLib import interpolatable
 
+from . import resequence
+
 # How serious each kind of problem is:
 #   error    - the variable font can't be built (or would be broken)
 #   fixable  - breaks interpolation, but the app can re-sequence it without redrawing
@@ -27,6 +29,7 @@ SEVERITY = {
     "anchors": "error",
     "contour_order": "fixable",
     "wrong_start_point": "fixable",
+    "point_order": "fixable",
     "kink": "warning",
     "underweight": "warning",
     "overweight": "warning",
@@ -81,6 +84,18 @@ def _describe(p: dict) -> str:
     return f"{kind} between {m1} and {m2}"
 
 
+def _reorderable(fonts, glyph: str) -> bool:
+    """Whether reordering contours, reversing them and moving start points
+    (without redrawing) gives ``glyph`` the same structure in every font."""
+    reference = resequence.glyph_contours(fonts[0][glyph])
+    for font in fonts[1:]:
+        try:
+            resequence.match(reference, resequence.glyph_contours(font[glyph]))
+        except resequence.ResequenceError:
+            return False
+    return True
+
+
 def check(weights: list[tuple[str, object]]) -> dict:
     """``weights``: (name, font) pairs, lightest first. Returns
     ``{"glyphs": {glyph: [problem, ...]}, "errors": n, "fixable": n, "warnings": n}``
@@ -120,6 +135,17 @@ def check(weights: list[tuple[str, object]]) -> dict:
 
     problems = interpolatable.test([_GlyphSet(f) for f in fonts], glyphs=complete, names=names)
     for glyph, found in problems.items():
+        # interpolatable compares segment kinds before it looks at start points
+        # and direction, so a contour that merely starts elsewhere or runs the
+        # other way shows up as "straight here, curved there" all along it.
+        # When reordering alone lines the weights up, say that instead.
+        if any(p["type"] == "node_incompatibility" for p in found) and _reorderable(fonts, glyph):
+            found = [p for p in found if p["type"] != "node_incompatibility"]
+            if not any(p["type"] in ("contour_order", "wrong_start_point") for p in found):
+                others = [n for n in names[1:]]
+                found.append({"type": "point_order", "message":
+                              f"The points run in a different order in {', '.join(others)} than in {names[0]} "
+                              "(start point or direction): Fix lines them up"})
         for p in found:
             add(glyph, dict(p))
 

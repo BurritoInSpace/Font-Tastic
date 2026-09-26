@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, readBase64, type Anchor, type Glyph, type Project } from '../api'
+import { api, readBase64, type Anchor, type CompatReport, type Glyph, type PointOrder, type Project } from '../api'
 import { basesFor, glyphLabel, marksFor, STANDARD_ANCHORS } from '../glyphs'
 import { ALTERNATE_FEATURES, nextAlternateName } from '../importPlan'
 import { useConfirm } from './Confirm'
+import { CONTOUR_COLOURS, PointLabels, PointMarks, ReferenceView } from './PointOrder'
 import { ReassignDialog } from './ReassignDialog'
 
 interface Props {
@@ -15,12 +16,17 @@ interface Props {
   onOpenGlyph?: (name: string | null) => void
   /** replace the project with one the server returned */
   onProject?: (project: Project) => void
-
+  /** the numbered points view, for fixing point order between weights */
+  showPoints?: boolean
+  onShowPoints?: (show: boolean) => void
+  compat?: CompatReport | null
 }
 
 const PAD = 160
 
-export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onOpenGlyph, onProject }: Props) {
+export function GlyphEditor({
+  project, glyph, onChanged, onError, onMessage, onOpenGlyph, onProject, showPoints = false, onShowPoints, compat,
+}: Props) {
   const [reassigning, setReassigning] = useState(false)
   const confirm = useConfirm()
   const [anchors, setAnchors] = useState<Anchor[]>(glyph.anchors)
@@ -37,6 +43,7 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onO
     origin: Anchor
   } | null>(null)
   const nudgeTimer = useRef<number | undefined>(undefined)
+  const [points, setPoints] = useState<PointOrder | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   /** what the SVG picked in fileInput is for */
   const [picking, setPicking] = useState<'replace' | 'alternate'>('replace')
@@ -47,6 +54,40 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onO
     setAnchors(glyph.anchors)
   }, [glyph])
   useEffect(() => setActive(null), [glyph.name])
+
+  // The numbered points view reads the outline point by point, and the default weight's.
+  useEffect(() => {
+    if (!showPoints) return
+    let cancelled = false
+    api.glyphPoints(glyph.name).then((p) => !cancelled && setPoints(p)).catch((e) => onError(String(e)))
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPoints, glyph.name, project.revision, project.weight])
+
+  const editPoints = async (op: 'start' | 'move' | 'reverse' | 'reset', contour = 0, value = 0) => {
+    try {
+      const res = await api.editPoints(glyph.name, op, contour, value)
+      setPoints(res.points)
+      onProject?.(res.project)
+    } catch (e) {
+      onError(String(e))
+    }
+  }
+
+  const matchToDefault = async () => {
+    try {
+      const res = await api.matchGlyph(glyph.name)
+      setPoints(res.points)
+      onProject?.(res.project)
+      const failed = Object.entries(res.errors)
+      if (failed.length) onError(failed.map(([w, m]) => `${w}: ${m}`).join('; '))
+      else onMessage?.(res.changed.length ? `Matched ${glyph.name} in ${res.changed.join(', ')}` : 'Already in the same order')
+    } catch (e) {
+      onError(String(e))
+    }
+  }
 
   const commit = async (next: Anchor[]) => {
     try {
@@ -296,6 +337,11 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onO
             <path className={`outline${attach ? ' draggable' : ''}`} d={glyph.path}
               transform={`translate(${viewOffset.x},${viewOffset.y})`}
               onPointerDown={attach ? onPointerDown(attach.index, 'mark') : undefined} />
+            {showPoints && points && (
+              <g transform={`translate(${viewOffset.x},${viewOffset.y})`}>
+                <PointMarks contours={points.contours} onPick={(c, p) => void editPoints('start', c, p)} />
+              </g>
+            )}
             {anchors.map((a, i) => (
               <g key={i} className={`anchor${i === active ? ' active' : ''}${a.name.startsWith('_') ? ' mark-anchor' : ''}`}
                 transform={`translate(${shown(a).x},${shown(a).y})`}
@@ -309,6 +355,7 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onO
           {metricLines.map((m) => (
             <text key={m.label} className="metric-label" x={x0 + 12} y={-m.y - 10}>{m.label}</text>
           ))}
+          {showPoints && points && <PointLabels contours={points.contours} offset={viewOffset} />}
           {anchors.map((a, i) => (
             <text key={i} className={`anchor-label${a.name.startsWith('_') ? ' mark-anchor' : ''}`}
               x={shown(a).x + 26} y={-shown(a).y - 26}>{a.name}</text>
@@ -370,6 +417,18 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onO
         )}
 
         <WidthField glyph={glyph} onChanged={onChanged} onError={onError} />
+
+        <div className="row">
+          <h4 className="grow">Point order</h4>
+          <button className={`toggle ${showPoints ? 'on' : 'off'}`} onClick={() => onShowPoints?.(!showPoints)}
+            title="Number the points, to line this glyph up with the other weights">
+            {showPoints ? 'Hide points' : 'Show points'}
+          </button>
+        </div>
+        {showPoints && points && (
+          <PointOrderSection glyph={glyph} points={points} weight={project.weight} compat={compat ?? null}
+            onEdit={(op, c, v) => void editPoints(op, c, v)} onMatch={() => void matchToDefault()} />
+        )}
 
         <h4>Anchors</h4>
         <table className="anchors">
@@ -485,6 +544,76 @@ function WidthField({ glyph, onChanged, onError }: Omit<Props, 'project'>) {
 }
 
 /** Text input that only reports on Enter or blur, so typing doesn't spam the server. */
+/** Contour list, the default weight for comparison, and the fixes. */
+function PointOrderSection({ glyph, points, weight, compat, onEdit, onMatch }: {
+  glyph: Glyph
+  points: PointOrder
+  weight: string
+  compat: CompatReport | null
+  onEdit: (op: 'move' | 'reverse' | 'reset', contour?: number, value?: number) => void
+  onMatch: () => void
+}) {
+  const problems = (compat?.glyphs[glyph.name] ?? []).filter((p) => p.severity !== 'warning' && p.type !== 'anchors')
+  const isDefault = points.defaultWeight === weight
+  const n = points.contours.length
+  return (
+    <div className="point-order">
+      {points.defaultWeight && (
+        <p className={`hint${problems.length ? ' warn' : ''}`}>
+          {compat === null ? '' : problems.length === 0
+            ? `Lines up with the other weights.`
+            : problems.some((p) => p.severity === 'error')
+              ? 'Some weights have different points; that needs redrawing (see the variable tab).'
+              : `The point order differs between weights; Match fixes it.`}
+        </p>
+      )}
+      {points.reference && (
+        <figure>
+          <ReferenceView reference={points.reference} />
+          <figcaption className="muted small">{points.defaultWeight} (default)</figcaption>
+        </figure>
+      )}
+      <table className="contours">
+        <tbody>
+          {points.contours.map((c, i) => (
+            <tr key={i}>
+              <td><span className="swatch" style={{ background: CONTOUR_COLOURS[i % CONTOUR_COLOURS.length] }} /></td>
+              <td>#{i + 1}</td>
+              <td className="muted small">
+                {c.points.filter((p) => p[2] !== null).length} points{' '}
+                <span title={c.closed ? (c.clockwise ? 'Clockwise' : 'Counter-clockwise') : 'Open path'}>
+                  {c.closed ? (c.clockwise ? '↻' : '↺') : '(open)'}
+                </span>
+              </td>
+              <td className="contour-actions">
+                <button className="icon" title="Earlier in the order" disabled={i === 0} onClick={() => onEdit('move', i, i - 1)}>↑</button>
+                <button className="icon" title="Later in the order" disabled={i === n - 1} onClick={() => onEdit('move', i, i + 1)}>↓</button>
+                <button className="icon" title="Reverse direction (keeps the start point)" disabled={!c.closed}
+                  onClick={() => onEdit('reverse', i)}>⇄</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="row">
+        {points.defaultWeight && (
+          <button className="secondary" onClick={onMatch}
+            title={isDefault ? 'Reorder the other weights to follow this one' : `Reorder this glyph in every weight to follow ${points.defaultWeight}`}>
+            {isDefault ? 'Match other weights to this' : `Match to ${points.defaultWeight}`}
+          </button>
+        )}
+        {points.fixed && (
+          <button onClick={() => onEdit('reset')} title="Back to the order the SVG was drawn in">Reset to as drawn</button>
+        )}
+      </div>
+      <p className="hint">
+        Click a point on the canvas to start its contour there. #n marks where contour n starts; the arrow shows
+        its direction. Fixes are kept and reapplied when the SVG is edited in Illustrator.
+      </p>
+    </div>
+  )
+}
+
 export function CommitInput({ value, onCommit, numeric, placeholder }: {
   value: string
   onCommit: (v: string) => void

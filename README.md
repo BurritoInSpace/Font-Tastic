@@ -137,6 +137,16 @@ font with a weight axis:
   different start point or contour order) and *may look off in between*
   (warnings). In the glyph list, a red **≠** or orange **↻** badge marks the
   glyphs concerned.
+- **Point order fixes:** **Fix** (one glyph) or **Fix all** in the variable
+  tab reorders contours, direction and start points in every weight to follow
+  the default weight. For a closer look, **Show points** in the glyph panel
+  numbers the points on the canvas: `#n` marks where contour n starts, an
+  arrow shows its direction, and the default weight is shown alongside for
+  comparison. Click a point to start its contour there, or reorder and
+  reverse contours from the list. Fixes are stored with the glyph and
+  reapplied whenever its SVG is re-imported, so the SVG can keep being edited
+  in Illustrator. If a redrawing changes the points, the fix is dropped with a
+  warning.
 - **Export** can write `build/MyFont-VF.otf` (CFF2: cubic curves exactly as
   drawn) and `build/MyFont-VF.ttf` (TrueType: curves converted compatibly
   across weights). These options stay disabled, with the reason, until
@@ -288,7 +298,9 @@ ligatures and alternates → compile → RTL preview, plus project handling
 trip (folder watcher, Edit in Illustrator).
 
 Next:
-- Variable fonts (Phase 2)
+- Variable fonts (Phase 2): weight axis, compatibility checks, point order
+  fixes and variable export are done; next are multiple axes (width, optical
+  size, slant, custom)
 - Bilingual/multilingual fonts, Hebrew + Latin first (Phase 3, the end
   goal; see the brief)
 

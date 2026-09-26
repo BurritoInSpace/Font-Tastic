@@ -40,7 +40,7 @@ import ufoLib2
 from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.svgPathPen import SVGPathPen
 
-from . import features, hebrew, naming
+from . import features, hebrew, naming, resequence
 from .svg_import import outline_to_svg, parse_svg, read_svg
 
 LIB = "com.fonttastic"
@@ -50,9 +50,11 @@ WARNINGS = f"{LIB}.warnings"
 WIDTH_OVERRIDE = f"{LIB}.widthOverride"
 AUTO = f"{LIB}.auto"
 IMPORT_VERSION_KEY = f"{LIB}.importVersion"
+RESEQUENCE = f"{LIB}.resequence"  # point order fix, see resequence.py
 # Bump when the importer's output changes, so existing glyphs are re-read once.
 # 2: contours kept as drawn (no overlap merging).
-IMPORT_VERSION = 2
+# 3: a closing segment that ends a rounding error away from the start is closed exactly.
+IMPORT_VERSION = 3
 
 DEFAULT_INFO = dict(unitsPerEm=1000, ascender=800, descender=-200, capHeight=700, xHeight=500)
 
@@ -232,7 +234,31 @@ class Project:
             self._activate(self.weight_by_name(name))
             self.settings["currentWeight"] = name
             self._save_project_file()
+            self.import_all()  # catch up on SVGs saved while it wasn't being edited
             self.revision += 1
+
+    def watch_dirs(self) -> dict[Path, str]:
+        """Every weight's SVG folder, and whose it is."""
+        with self.lock:
+            return {(self.root / w.glyphs).resolve(): w.name for w in self.weights}
+
+    def import_weights(self, names: list[str] | None = None, force: bool = False) -> dict:
+        """``import_all`` in each named weight (default: all). Glyphs imported
+        into a weight other than the one being edited are reported as
+        ``"name (Weight)"``."""
+        with self.lock:
+            total = {"imported": [], "unchanged": 0, "errors": {}, "missingSource": []}
+            for w in self.weights:
+                if names is not None and w.name not in names:
+                    continue
+                with self._in_weight(w):
+                    report = self.import_all(force)
+                label = (lambda n: n) if w is self.active else (lambda n, w=w: f"{n} ({w.name})")
+                total["imported"] += [label(n) for n in report["imported"]]
+                total["missingSource"] += [label(n) for n in report["missingSource"]]
+                total["unchanged"] += report["unchanged"]
+                total["errors"].update({label(f): e for f, e in report["errors"].items()})
+            return total
 
     def add_weight(self, name: str, weight_class: int, copy_from: str) -> Weight:
         """Add a weight as a copy of an existing one (its SVGs, anchors, widths
@@ -455,6 +481,7 @@ class Project:
                 width = max(round(bounds[2]) + 100 if bounds else 0, round(info.unitsPerEm * 0.6))
             path = self.glyphs_dir / (source or f"{name}.svg")
             path.write_text(outline_to_svg(glyph, width, info.ascender, info.descender), encoding="utf-8")
+            glyph.lib.pop(RESEQUENCE, None)  # the new SVG is drawn in the fixed order already
             self._import_glyph(path, naming.parse_filename(path.stem))
             self._commit()
             return path
@@ -467,13 +494,22 @@ class Project:
         if glyph is None:  # not `or`: a glyph with no contours is falsy
             glyph = self.font.newGlyph(parsed.glyph_name)
 
-        glyph.clearContours()
-        outline.draw_points(glyph.getPointPen())
+        contours = resequence.collect(outline.draw_points)
+        warnings = list(outline.warnings)
+        if recipe := glyph.lib.get(RESEQUENCE):
+            fixed = resequence.apply(contours, recipe)
+            if fixed is None:
+                glyph.lib.pop(RESEQUENCE)
+                warnings.append("The saved point order no longer fits this drawing (its points changed), "
+                                "so it was dropped. Match it again if the weights don't line up.")
+            else:
+                contours = fixed
+        resequence.write_contours(glyph, contours)
         glyph.unicodes = [parsed.unicode] if parsed.unicode is not None else []
         glyph.lib.pop(AUTO, None)
         glyph.lib[SOURCE] = path.name
         glyph.lib[SOURCE_MTIME] = path.stat().st_mtime
-        glyph.lib[WARNINGS] = outline.warnings
+        glyph.lib[WARNINGS] = warnings
         glyph.lib[IMPORT_VERSION_KEY] = IMPORT_VERSION
 
         category = naming.category_for(parsed)
@@ -502,6 +538,126 @@ class Project:
         elif hebrew.is_hebrew_letter(cp):
             for name, x, y in hebrew.default_base_anchors(cp, glyph.width, bounds, info.capHeight):
                 glyph.appendAnchor({"name": name, "x": x, "y": y})
+
+    # -- point order (re-sequencing) --------------------------------------------
+
+    def default_weight(self) -> Weight:
+        """The master the others are matched to: the variable font's default."""
+        from . import variable
+
+        return self.weight_by_name(variable.settings(self)["default"])
+
+    def _raw_contours(self, name: str) -> list:
+        """The glyph's contours as drawn: read from its SVG, or its outline when
+        it has no SVG (then fixes change the outline itself)."""
+        if self.has_source(name):
+            info = self.font.info
+            svg = self.glyphs_dir / self.glyph(name).lib[SOURCE]
+            return resequence.collect(read_svg(svg, info.ascender, info.descender).draw_points)
+        return resequence.glyph_contours(self.glyph(name))
+
+    def _set_recipe(self, name: str, raw: list, recipe: dict | None) -> bool:
+        """Apply ``recipe`` (None: as drawn) in the active weight and keep it
+        for later imports. Returns whether the outline changed."""
+        glyph = self.glyph(name)
+        before = resequence.glyph_contours(glyph)
+        if recipe is not None and resequence.is_identity(recipe):
+            recipe = None
+        if self.has_source(name):
+            if recipe is None:
+                glyph.lib.pop(RESEQUENCE, None)
+            else:
+                glyph.lib[RESEQUENCE] = recipe
+            path = self.glyphs_dir / glyph.lib[SOURCE]
+            self._import_glyph(path, naming.parse_filename(path.stem))
+        elif recipe is not None:
+            resequence.write_contours(glyph, resequence.apply(raw, recipe))
+        return resequence.glyph_contours(glyph) != before
+
+    def match_to_default(self, name: str) -> dict:
+        """Reorder contours and move start points in every other weight so
+        ``name`` lines up with the default weight. Returns
+        ``{"changed": [weights], "errors": {weight: message}}``."""
+        with self.lock:
+            default = self.default_weight()
+            with self._in_weight(default):
+                reference = resequence.glyph_contours(self.glyph(name))
+            changed, errors = [], {}
+            for w in self.weights:
+                if w is default:
+                    continue
+                with self._in_weight(w):
+                    if name not in self.font:
+                        continue
+                    raw = self._raw_contours(name)
+                    try:
+                        recipe = resequence.match(reference, raw)
+                    except resequence.ResequenceError as exc:
+                        errors[w.name] = str(exc)
+                        continue
+                    if self._set_recipe(name, raw, recipe):
+                        changed.append(w.name)
+                        self._commit()
+            return {"changed": changed, "errors": errors}
+
+    def match_all_to_default(self) -> dict:
+        """``match_to_default`` for every glyph the compatibility check says
+        is fixable. Returns ``{"fixed": [glyphs], "errors": {glyph: message}}``."""
+        with self.lock:
+            report = self.compatibility()
+            fixable = [g for g, ps in report["glyphs"].items() if any(p["severity"] == "fixable" for p in ps)]
+            fixed, errors = [], {}
+            for name in fixable:
+                result = self.match_to_default(name)
+                if result["changed"]:
+                    fixed.append(name)
+                for weight, message in result["errors"].items():
+                    errors[name] = f"{weight}: {message}"
+            return {"fixed": fixed, "errors": errors}
+
+    def edit_point_order(self, name: str, op: str, contour: int = 0, value: int = 0):
+        """A manual point order change in the active weight (see
+        ``resequence.edit``); ``op="reset"`` goes back to the order as drawn."""
+        with self.lock:
+            raw = self._raw_contours(name)
+            if op == "reset":
+                recipe = None
+            else:
+                try:
+                    recipe = resequence.edit(raw, self.glyph(name).lib.get(RESEQUENCE), op, contour, value)
+                except resequence.ResequenceError as exc:
+                    raise ProjectError(str(exc)) from None
+            if self._set_recipe(name, raw, recipe) or op == "reset":
+                self._commit()
+
+    def point_order(self, name: str) -> dict:
+        """The glyph's points in order, for the numbered points view, and the
+        default weight's for comparison (when this isn't the default)."""
+
+        def describe(glyph):
+            return [
+                {
+                    "points": [[p[0], p[1], p[2]] for p in c],
+                    "closed": resequence.is_closed(c),
+                    "clockwise": resequence.signed_area(c) < 0,
+                }
+                for c in resequence.glyph_contours(glyph)
+            ]
+
+        with self.lock:
+            glyph = self.glyph(name)
+            out = {"contours": describe(glyph), "fixed": RESEQUENCE in glyph.lib,
+                   "defaultWeight": None, "reference": None}
+            if len(self.weights) > 1:
+                default = self.default_weight()
+                out["defaultWeight"] = default.name
+                if default is not self.active:
+                    with self._in_weight(default):
+                        if name in self.font:
+                            ref = self.font[name]
+                            out["reference"] = {"contours": describe(ref), "path": glyph_svg_path(ref),
+                                                "bounds": _bounds(ref)}
+            return out
 
     def duplicate_mark(self, source: str, target_cp: int) -> str:
         """Make a new niqqud glyph from an existing mark's drawing, e.g. a

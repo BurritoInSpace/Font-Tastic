@@ -136,6 +136,28 @@ contour count / point count / point order across them.
   writers generate variable GSUB/GPOS directly from per-master data rather
   than needing a separate variable-specific system.
 
+### Multiple axes (after re-sequencing)
+
+Beyond weight: width, optical size, slant/italic, and custom axes. Planned
+after the re-sequencing step (start points, contour order), which doesn't
+depend on it, because every master is compared with the default master
+however many axes there are.
+
+- Masters become "masters at a location" (e.g. Bold Condensed = wght 700,
+  wdth 75) rather than "weights"; the weight menu becomes a master menu.
+- Axes are defined per project: tag, name, min/default/max, plus optional
+  user-to-design mapping. Standard tags (`wght`, `wdth`, `opsz`, `slnt`,
+  `ital`) get sensible defaults; custom axes use uppercase tags.
+- Named instances get a location on every axis; the Variable tab gets one
+  slider per axis for the interpolation preview.
+- Designspace export places masters and instances on all axes; sparse
+  masters (a master that only defines some glyphs) keep working.
+- Compatibility checks stay per master against the default; with several
+  axes, missing corner masters are worth a warning, since interpolation
+  there can be surprising.
+- Fixes stored by re-sequencing are keyed by master name, not weight value,
+  so they keep working when masters gain other axes.
+
 ## Project folders & file handling
 
 **Goal:** the app has its own project format and handling. A project is one

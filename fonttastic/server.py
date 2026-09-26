@@ -100,6 +100,14 @@ class DuplicateRequest(BaseModel):
     unicode: int
 
 
+class PointOrderRequest(BaseModel):
+    """A manual point order change: op is start, move, reverse or reset."""
+
+    op: str
+    contour: int = 0
+    value: int = 0
+
+
 class NewWeightRequest(BaseModel):
     name: str
     weight: int
@@ -168,7 +176,7 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
     def activate(project: Project):
         state.set_project(project)
         recent.touch(project.file, project.name)
-        report = project.import_all()
+        report = project.import_weights()  # every weight: SVGs may have changed while closed
         return {"project": project.summary(), "import": report}
 
     @app.get("/api/project")
@@ -261,7 +269,7 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
     @app.post("/api/project/import")
     def reimport(req: ImportRequest):
         project = state.require()
-        report = project.import_all(force=req.force)
+        report = project.import_weights(force=req.force)
         return {"project": project.summary(), "import": report}
 
     @app.post("/api/import/analyze")
@@ -299,6 +307,32 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
         project = state.require()
         mapping = guard(project.rename_glyph, name, req.newName, req.swap, req.moveAlternates)
         return {"renamed": mapping, "project": project.summary()}
+
+    @app.get("/api/glyphs/{name}/points")
+    def glyph_points(name: str):
+        """Points in order, for the numbered points view."""
+        return guard(state.require().point_order, name)
+
+    @app.post("/api/glyphs/{name}/points")
+    def edit_points(name: str, req: PointOrderRequest):
+        """Change the start point, contour order or direction in this weight."""
+        project = state.require()
+        guard(project.edit_point_order, name, req.op, req.contour, req.value)
+        return {"points": project.point_order(name), "project": project.summary()}
+
+    @app.post("/api/glyphs/{name}/match")
+    def match_glyph(name: str):
+        """Line this glyph up with the default weight in every other weight."""
+        project = state.require()
+        result = guard(project.match_to_default, name)
+        return {**result, "points": project.point_order(name), "project": project.summary()}
+
+    @app.post("/api/compat/fix")
+    def fix_all():
+        """Match every glyph with fixable point order problems to the default weight."""
+        project = state.require()
+        result = guard(project.match_all_to_default)
+        return {**result, "compat": project.compatibility(), "project": project.summary()}
 
     @app.post("/api/glyphs/{name}/duplicate")
     def duplicate_glyph(name: str, req: DuplicateRequest):

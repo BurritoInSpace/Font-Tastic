@@ -495,3 +495,28 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .export-body p { margin: 0; }
 .check { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; cursor: pointer; }
 .weights-pick { padding-left: 2px; }
+
+/* Point order (numbered points view) */
+.canvas .point-marks, .reference-view .point-marks { color: var(--ft-blue); }
+.point-marks .point-path, .point-marks .start-ring, .point-marks .start-arrow, .point-marks .off-point { pointer-events: none; }
+.point-marks .point-path { fill: none; stroke: currentColor; stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.45; vector-effect: non-scaling-stroke; }
+.point-marks .on-point { fill: currentColor; stroke: var(--canvas); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.point-marks .on-point.pickable { cursor: pointer; }
+.point-marks .on-point.pickable:hover { stroke: var(--ft-white); stroke-width: 3; }
+.point-marks .off-point { fill: var(--canvas); stroke: currentColor; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.point-marks .start-ring { fill: none; stroke: currentColor; stroke-width: 3; vector-effect: non-scaling-stroke; }
+.point-marks .start-arrow line { stroke: currentColor; stroke-width: 3; vector-effect: non-scaling-stroke; }
+.point-marks .start-arrow polygon { fill: currentColor; }
+.point-labels text { font-family: ui-monospace, Consolas, monospace; pointer-events: none; paint-order: stroke; stroke: var(--canvas); stroke-width: 4px; }
+.point-labels text.start { font-weight: 700; }
+.point-order { display: flex; flex-direction: column; gap: 8px; }
+.point-order .hint.warn { color: #9a5a00; }
+.point-order figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.reference-view { width: 100%; height: 160px; background: var(--ft-bg); --canvas: var(--ft-bg); }
+.reference-view .outline { fill: #5a5a5a; }
+.contours { width: 100%; border-collapse: collapse; font-size: 12px; }
+.contours td { padding: 2px 4px; }
+.contours .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+.contours .contour-actions { text-align: right; white-space: nowrap; }
+.inspector .row > h4.grow { margin: 0; }
+.compat-list li .row .link { text-align: left; }

@@ -6,15 +6,19 @@ import { CommitInput } from './GlyphEditor'
 interface Props {
   project: Project
   compat: CompatReport | null
-  onOpenGlyph: (name: string) => void
+  /** points: open it in the numbered points view */
+  onOpenGlyph: (name: string, points?: boolean) => void
   onNewWeight: () => void
   onError: (msg: string) => void
+  onProject: (project: Project) => void
+  onCompat: (compat: CompatReport) => void
+  onMessage: (msg: string) => void
 }
 
 const SEVERITY_LABEL = { error: 'Needs redrawing', fixable: 'Fixable in the app', warning: 'May look off in between' }
 
 /** The Variable tab: weight axis, named instances, a live interpolation preview and the compatibility report. */
-export function VariablePanel({ project, compat, onOpenGlyph, onNewWeight, onError }: Props) {
+export function VariablePanel({ project, compat, onOpenGlyph, onNewWeight, onError, onProject, onCompat, onMessage }: Props) {
   const [setup, setSetup] = useState<VariableSetup | null>(null)
 
   useEffect(() => {
@@ -115,7 +119,30 @@ export function VariablePanel({ project, compat, onOpenGlyph, onNewWeight, onErr
 
       <aside className="side-panel light">
         <h4>Compatibility</h4>
-        <CompatReportView compat={compat} onOpenGlyph={onOpenGlyph} />
+        <CompatReportView compat={compat} onOpenGlyph={onOpenGlyph} defaultWeight={setup.default!}
+          onFixAll={async () => {
+            try {
+              const res = await api.fixAll()
+              onProject(res.project)
+              onCompat(res.compat)
+              const failed = Object.entries(res.errors)
+              if (failed.length) onError(`Couldn't match ${failed.map(([g, m]) => `${g} (${m})`).join('; ')}`)
+              else onMessage(res.fixed.length ? `Matched ${res.fixed.join(', ')} to ${setup.default}` : 'Nothing to fix')
+            } catch (e) {
+              onError(String(e))
+            }
+          }}
+          onFix={async (name) => {
+            try {
+              const res = await api.matchGlyph(name)
+              onProject(res.project)
+              const failed = Object.entries(res.errors)
+              if (failed.length) onError(failed.map(([w, m]) => `${w}: ${m}`).join('; '))
+              else onMessage(`Matched ${name} to ${setup.default}`)
+            } catch (e) {
+              onError(String(e))
+            }
+          }} />
       </aside>
     </div>
   )
@@ -187,7 +214,13 @@ function VariablePreview({ project, setup }: { project: Project; setup: Variable
   )
 }
 
-function CompatReportView({ compat, onOpenGlyph }: { compat: CompatReport | null; onOpenGlyph: (g: string) => void }) {
+function CompatReportView({ compat, onOpenGlyph, defaultWeight, onFix, onFixAll }: {
+  compat: CompatReport | null
+  onOpenGlyph: (g: string, points?: boolean) => void
+  defaultWeight: string
+  onFix: (g: string) => void
+  onFixAll: () => void
+}) {
   if (!compat) return <p className="hint">Checking…</p>
   const entries = Object.entries(compat.glyphs)
   if (!entries.length) {
@@ -205,11 +238,24 @@ function CompatReportView({ compat, onOpenGlyph }: { compat: CompatReport | null
         if (!glyphs.length) return null
         return (
           <div key={sev} className="compat-list">
-            <h4>{SEVERITY_LABEL[sev]}</h4>
+            <div className="row">
+              <h4 className="grow">{SEVERITY_LABEL[sev]}</h4>
+              {sev === 'fixable' && (
+                <button className="secondary" onClick={onFixAll}
+                  title={`Reorder contours and start points in every weight to follow ${defaultWeight}`}>
+                  Fix all
+                </button>
+              )}
+            </div>
             <ul>
               {glyphs.map(([name, ps]) => (
                 <li key={name} className={sev}>
-                  <button className="link" onClick={() => onOpenGlyph(name)}>{name}</button>
+                  <div className="row">
+                    <button className="link grow" onClick={() => onOpenGlyph(name, sev !== 'warning')}>{name}</button>
+                    {sev === 'fixable' && (
+                      <button className="chip" onClick={() => onFix(name)} title={`Match to ${defaultWeight}`}>Fix</button>
+                    )}
+                  </div>
                   {ps.filter((p) => p.severity === sev).map((p, i) => <div key={i}>{p.message}</div>)}
                 </li>
               ))}

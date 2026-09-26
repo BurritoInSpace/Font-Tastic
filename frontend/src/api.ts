@@ -107,6 +107,22 @@ export interface CompatProblem {
   [detail: string]: unknown
 }
 
+export interface PointContour {
+  /** [x, y, segment type]; type null is an off-curve point */
+  points: [number, number, string | null][]
+  closed: boolean
+  clockwise: boolean
+}
+
+/** A glyph's points in order, plus the default weight's to compare with. */
+export interface PointOrder {
+  contours: PointContour[]
+  /** a saved point order fix is applied to this weight's drawing */
+  fixed: boolean
+  defaultWeight: string | null
+  reference: { contours: PointContour[]; path: string; bounds: [number, number, number, number] | null } | null
+}
+
 export interface CompatReport {
   glyphs: Record<string, CompatProblem[]>
   errors: number
@@ -236,6 +252,16 @@ export const api = {
       'POST', `/api/glyphs/${encodeURIComponent(glyph)}/rename`, { newName, swap, moveAlternates }),
   duplicateGlyph: (glyph: string, unicode: number) =>
     call<{ name: string; project: Project }>('POST', `/api/glyphs/${encodeURIComponent(glyph)}/duplicate`, { unicode }),
+  glyphPoints: (glyph: string) => call<PointOrder>('GET', `/api/glyphs/${encodeURIComponent(glyph)}/points`),
+  editPoints: (glyph: string, op: 'start' | 'move' | 'reverse' | 'reset', contour = 0, value = 0) =>
+    call<{ points: PointOrder; project: Project }>(
+      'POST', `/api/glyphs/${encodeURIComponent(glyph)}/points`, { op, contour, value }),
+  matchGlyph: (glyph: string) =>
+    call<{ changed: string[]; errors: Record<string, string>; points: PointOrder; project: Project }>(
+      'POST', `/api/glyphs/${encodeURIComponent(glyph)}/match`),
+  fixAll: () =>
+    call<{ fixed: string[]; errors: Record<string, string>; compat: CompatReport; project: Project }>(
+      'POST', '/api/compat/fix'),
   revealGlyph: (glyph: string) => call<{ path: string }>('POST', `/api/glyphs/${encodeURIComponent(glyph)}/reveal`),
   setAnchors: (glyph: string, anchors: Anchor[]) =>
     call<Glyph>('PUT', `/api/glyphs/${encodeURIComponent(glyph)}/anchors`, { anchors }),

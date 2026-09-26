@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -56,15 +57,51 @@ def find_illustrator(search_dirs: list[Path] | None = None) -> Illustrator | Non
     return Illustrator(best.name, best / EXE_IN_INSTALL)
 
 
+@contextmanager
+def _outside_bundle():
+    """Yields the environment to start another program with.
+
+    In the packaged app, PyInstaller points the DLL search path (and PATH) at
+    the app's bundled runtime. Programs started from it would inherit that and
+    load the app's copies of DLLs such as MSVCP140.dll, which also locks them
+    while those programs run. Clear both for the launch.
+    """
+    bundle = getattr(sys, "_MEIPASS", None)
+    if not bundle or sys.platform != "win32":
+        yield None
+        return
+    import ctypes
+
+    inside = os.path.normcase(os.path.abspath(bundle))
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join(
+        p for p in env.get("PATH", "").split(os.pathsep)
+        if p and not os.path.normcase(os.path.abspath(p)).startswith(inside)
+    )
+    kernel32 = ctypes.windll.kernel32
+    kernel32.SetDllDirectoryW(None)
+    try:
+        yield env
+    finally:
+        kernel32.SetDllDirectoryW(bundle)
+
+
 def open_in_illustrator(svg: Path) -> str:
     """Launch Illustrator (or the default SVG app) on ``svg``. Returns what was used."""
     app = find_illustrator()
+    with _outside_bundle() as env:
+        return _launch(app, svg, env)
+
+
+def _launch(app: Illustrator | None, svg: Path, env) -> str:
     if sys.platform == "darwin":
         cmd = ["open", "-a", app.name, str(svg)] if app else ["open", str(svg)]
         subprocess.Popen(cmd)
         return app.name if app else "the default app"
     if app is not None:
-        subprocess.Popen([str(app.path), str(svg)], close_fds=True)
+        # From the home folder: its helper processes (crash reporter etc.) inherit
+        # the working folder and can outlive it, keeping it locked.
+        subprocess.Popen([str(app.path), str(svg)], close_fds=True, env=env, cwd=Path.home())
         return app.name
     if sys.platform == "win32":
         os.startfile(svg)  # noqa: S606 — the user's own file, in their default app
@@ -83,7 +120,8 @@ def reveal_in_file_manager(path: Path):
         # Explorer wants /select,"C:\path" with the quotes around the path only; passed
         # as a list item, Python would quote the whole argument and Explorer
         # would ignore it (just opening a window on its default folder).
-        subprocess.Popen(reveal_command(path))
+        with _outside_bundle() as env:
+            subprocess.Popen(reveal_command(path), env=env)
     elif sys.platform == "darwin":
         subprocess.Popen(["open", "-R", str(path)])
     else:

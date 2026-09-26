@@ -1,4 +1,4 @@
-"""Watch a project's glyphs/ folder and re-import SVGs when they change on disk.
+"""Watch a project's SVG folders (one per weight) and re-import SVGs when they change on disk.
 
 Saving in Illustrator is the main trigger, but anything counts: files added,
 edited or deleted by any program. Re-import is mtime-based, so a burst of
@@ -43,19 +43,33 @@ class GlyphWatcher:
         return self._thread.is_alive() and not self._stop.is_set()
 
     def _run(self):
-        folder = Path(self.project.glyphs_dir)
+        # Every weight's folder is watched, not just the one being edited: a
+        # weight's SVGs can be saved in Illustrator while another is on screen.
+        # The set of folders changes when weights are added or removed, so it's
+        # re-read on every quiet tick and the watch restarts when it moved.
         try:
-            for _changes in watch(folder, watch_filter=_is_svg, stop_event=self._stop,
-                                  debounce=800, step=100, recursive=False, raise_interrupt=False):
-                time.sleep(SETTLE_SECONDS)
-                if self._stop.is_set():
-                    return
-                self._import()
+            while not self._stop.is_set():
+                folders = self.project.watch_dirs()
+                existing = [f for f in folders if f.is_dir()]
+                if not existing:
+                    self._stop.wait(1)
+                    continue
+                for changes in watch(*existing, watch_filter=_is_svg, stop_event=self._stop, debounce=800,
+                                     step=100, recursive=False, raise_interrupt=False,
+                                     yield_on_timeout=True, rust_timeout=1000):
+                    if self._stop.is_set():
+                        return
+                    if changes:
+                        time.sleep(SETTLE_SECONDS)
+                        changed = {folders.get(Path(p).parent.resolve()) for _, p in changes}
+                        self._import(sorted(n for n in changed if n))
+                    if self.project.watch_dirs() != folders:
+                        break  # weights were added, removed or moved: watch the new set
         except Exception:  # never take the app down; the Re-import button still works
             traceback.print_exc(file=sys.stderr)
 
-    def _import(self):
-        report = self.project.import_all()
+    def _import(self, weights: list[str] | None = None):
+        report = self.project.import_weights(weights)
         if report["imported"] or report["errors"] or report["missingSource"]:
             self.last_report = {**report, "revision": self.project.revision, "at": time.time()}
             if self.on_change:

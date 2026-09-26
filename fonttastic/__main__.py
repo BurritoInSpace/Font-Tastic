@@ -107,7 +107,7 @@ def main(argv=None):
             print(exc, file=sys.stderr)  # start on the home screen instead
         if project is not None:
             recent.touch(project.file, project.name)
-            project.import_all()
+            project.import_weights()
 
     port = args.port or (DEV_API_PORT if args.dev else free_port())
     if not args.dev and not FRONTEND_DIST.is_dir():

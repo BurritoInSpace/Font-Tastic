@@ -53,6 +53,36 @@ def test_watcher_reimports_saved_and_new_files(project):
         watcher.stop()
 
 
+def test_watcher_follows_every_weight(project):
+    """Adding a weight moves the SVGs into per-weight folders; saves in any
+    weight's folder are picked up, whichever weight is on screen."""
+    reports = []
+    watcher = GlyphWatcher(project, reports.append).start()
+    try:
+        time.sleep(0.5)
+        project.add_weight("Bold", 700, "Regular")  # now editing Bold; Regular moved to glyphs/Regular
+        time.sleep(1.5)  # the watcher notices the new folders
+        (project.glyphs_dir / "uni05D0.svg").write_bytes(TALL)
+        assert wait_for(lambda: project.font["uni05D0"].width == 300), "save in the edited weight was missed"
+
+        regular = project.root / project.weight_by_name("Regular").glyphs / "uni05D0.svg"
+        regular.write_bytes(TALL)
+        assert wait_for(lambda: any("uni05D0 (Regular)" in r["imported"] for r in reports)), \
+            "save in the other weight was missed"
+        project.switch_weight("Regular")
+        assert project.font["uni05D0"].width == 300
+    finally:
+        watcher.stop()
+
+
+def test_switching_weight_imports_what_changed_meanwhile(project):
+    project.add_weight("Bold", 700, "Regular")
+    regular = project.root / project.weight_by_name("Regular").glyphs / "uni05D0.svg"
+    regular.write_bytes(TALL)  # no watcher running
+    project.switch_weight("Regular")
+    assert project.font["uni05D0"].width == 300
+
+
 def test_source_svg_round_trips_outline(project):
     before = project.glyph_detail("uni05D0")["bounds"]
     (project.glyphs_dir / "uni05D0.svg").unlink()

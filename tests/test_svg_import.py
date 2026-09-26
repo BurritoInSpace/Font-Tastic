@@ -96,3 +96,37 @@ def test_stroke_only_paths_warn():
 def test_missing_viewbox_is_an_error():
     with pytest.raises(ValueError):
         parse_svg(b'<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>', ASC, DESC)
+
+
+def on_curve_count(out):
+    from fonttastic import resequence
+
+    return [sum(p[2] is not None for p in c) for c in resequence.collect(out.draw_points)]
+
+
+def small(body, w="8.4"):
+    """A 10 px tall artboard, like a glyph drawn at 10 pt: 1 px = 100 font units."""
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} 10"><path d="{body}"/></svg>'.encode()
+
+
+def test_closing_curve_that_stops_short_is_one_point_not_two():
+    # Illustrator's export: the closing curve ends 0.01 px (1 unit) off the start.
+    closed = parse_svg(small("M1,1 H5 V5 C5,7 3,8 1.01,8.01 C0,6 0,3 1.01,1.01 Z"), ASC, DESC)
+    assert on_curve_count(closed) == [4]
+    assert closed.warnings == []
+
+
+def test_closing_line_back_to_start_is_not_a_point():
+    out = parse_svg(small("M1,1 L5,1 L5,5 L1,5 L1.01,1.01 Z"), ASC, DESC)
+    assert on_curve_count(out) == [4]
+
+
+def test_real_closing_segment_is_kept():
+    out = parse_svg(small("M1,1 L5,1 L5,5 L1,5 L1,1.5 Z"), ASC, DESC)  # 50 units short: a real point
+    assert on_curve_count(out) == [5]
+
+
+def test_coarse_rounding_is_reported():
+    out = parse_svg(small("M1.1,1 L5,1 L5,5 L1,5 Z"), ASC, DESC)  # 1 decimal on a 10 px artboard
+    assert len(out.warnings) == 1 and "rounded to 10 font units" in out.warnings[0]
+    assert parse_svg(small("M1.12,1 L5,1 L5,5 L1,5 Z"), ASC, DESC).warnings == []

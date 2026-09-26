@@ -162,3 +162,14 @@ def test_export_only_what_is_chosen(project):
     assert [Path(p).name for p in r["paths"]] == [f"{family}-VF.otf"]
     assert client.post("/api/export", json={"staticFormats": [], "variableFormats": []}).status_code == 400
     assert client.post("/api/export", json={"weights": ["Nope"]}).status_code == 400
+
+
+def test_reversed_contour_is_fixable_not_a_redraw(project):
+    # The same shape drawn the other way round, from another corner: segment by
+    # segment it looks like straight-vs-curved, but reordering fixes it.
+    regular = '<path d="M100,100 H400 C450,300 450,600 400,800 H100 Z"/>'
+    bold = '<path d="M400,800 C450,600 450,300 400,100 H100 V800 Z"/>'
+    problems = two_weights(project, regular, bold)
+    assert [p["severity"] for p in problems if p["severity"] != "warning"] == ["fixable"]
+    assert project.match_all_to_default() == {"fixed": ["uni05D2"], "errors": {}}
+    assert project.compatibility()["glyphs"].get("uni05D2", []) == []

@@ -34,6 +34,7 @@ export default function App() {
   const [newWeight, setNewWeight] = useState(false)
   const [compat, setCompat] = useState<CompatReport | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [showPoints, setShowPoints] = useState(false)
   const revision = useRef<number | null>(null)
   revision.current = project?.revision ?? null
 
@@ -230,7 +231,8 @@ export default function App() {
           {tab === 'glyph' &&
             (glyph ? (
               <GlyphEditor project={project} glyph={glyph} onChanged={refresh} onError={onError}
-                onMessage={(text) => setMessage({ text })} onOpenGlyph={setSelected} onProject={setProject} />
+                onMessage={(text) => setMessage({ text })} onOpenGlyph={setSelected} onProject={setProject}
+                showPoints={showPoints} onShowPoints={setShowPoints} compat={compat} />
             ) : (
               <div className="empty">Pick a glyph on the left to place its anchors.</div>
             ))}
@@ -242,7 +244,9 @@ export default function App() {
           )}
           {tab === 'variable' && (
             <VariablePanel project={project} compat={compat} onError={onError}
-              onOpenGlyph={(n) => { setSelected(n); setTab('glyph') }} onNewWeight={() => setNewWeight(true)} />
+              onOpenGlyph={(n, points) => { setSelected(n); setTab('glyph'); if (points) setShowPoints(true) }}
+              onNewWeight={() => setNewWeight(true)} onProject={setProject} onCompat={setCompat}
+              onMessage={(text) => setMessage({ text })} />
           )}
           {tab === 'project' && (
             <div className="panel-page">

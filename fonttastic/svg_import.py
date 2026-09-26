@@ -35,6 +35,7 @@ from fontTools.svgLib.path.parser import parse_path
 from fontTools.svgLib.path.shapes import PathBuilder
 
 SHAPES = {"path", "rect", "circle", "ellipse", "polygon", "polyline", "line"}
+DECIMALS = re.compile(r"\d*\.(\d+)")  # the fraction digits of each number in an attribute
 SKIP = {
     "defs", "clipPath", "mask", "symbol", "pattern", "marker", "metadata",
     "title", "desc", "style", "linearGradient", "radialGradient", "filter",
@@ -78,9 +79,10 @@ def parse_svg(data: bytes, ascender: float, descender: float) -> ImportedOutline
     elements: list[tuple[list[list[tuple]], str]] = []
     seen_unsupported: set[str] = set()
     stroked = False
+    decimals = 0  # the most decimal places in the shapes' coordinates: how finely they were written
 
     def walk(el, ctm, inherited):
-        nonlocal stroked
+        nonlocal stroked, decimals
         if not isinstance(el.tag, str):
             return
         tag = _local(el.tag)
@@ -106,6 +108,9 @@ def parse_svg(data: bytes, ascender: float, descender: float) -> ImportedOutline
             if has_stroke:
                 stroked = True
             contours = _shape_contours(el, to_font.transform(ctm))
+            for value in el.attrib.values():
+                for digits in DECIMALS.findall(value):
+                    decimals = max(decimals, len(digits))
             if contours:
                 elements.append((contours, style.get("fill-rule", "nonzero")))
             return
@@ -118,6 +123,17 @@ def parse_svg(data: bytes, ascender: float, descender: float) -> ImportedOutline
         warnings.append("Some filled shapes also have strokes; strokes are ignored.")
     for tag in sorted(seen_unsupported):
         warnings.append(f"<{tag}> elements are not supported and were skipped.")
+
+    # How far apart two coordinates can be and still have been the same point
+    # before Illustrator rounded them, in font units.
+    grid = scale * 10 ** -decimals
+    if elements and grid > 1.01:
+        warnings.append(
+            f"Points are rounded to {grid:.3g} font units: the artboard is {vb_h:g} px tall and the SVG has "
+            f"{decimals} decimal place{'s' if decimals != 1 else ''}. In Illustrator's SVG options, raise "
+            "Decimal Places (or make the artboard 1000 px tall) so points land exactly.")
+    snap = max(2.0, grid * 1.5)
+    elements = [([_close_exactly(c, snap) for c in cs], rule) for cs, rule in elements]
 
     contours: list[list[tuple]] = []
     for element_contours, rule in elements:
@@ -181,6 +197,31 @@ def _closed(contour):
     if contour[-1][0] in ("closePath", "endPath"):
         contour = contour[:-1]
     return contour + [("closePath", ())]
+
+
+def _close_exactly(contour, tolerance: float):
+    """Illustrator writes a closed path's last segment out explicitly, back to
+    the start point. After rounding (and relative coordinates) it can end a
+    unit or so away from the start, which would read as one extra point. When
+    it ends within ``tolerance`` of the start, make it end exactly there: a
+    straight closing segment is dropped (closePath draws it), a curve keeps its
+    handles and lands on the start point. Repeats, since the SVG parser adds
+    its own exact line back to the start after a curve that stops short."""
+    while len(contour) >= 4 and contour[0][0] == "moveTo" and contour[-1][0] == "closePath":
+        start = contour[0][1][0]
+        op, args = contour[-2]
+        if op not in ("lineTo", "curveTo", "qCurveTo") or args[-1] is None:
+            break
+        end = args[-1]
+        if math.hypot(end[0] - start[0], end[1] - start[1]) > tolerance:
+            break
+        if op == "lineTo":
+            contour = contour[:-2] + [contour[-1]]
+            continue
+        if end != start:
+            contour = contour[:-2] + [(op, (*args[:-1], start)), contour[-1]]
+        break
+    return contour
 
 
 def _replay(contour, pen):
