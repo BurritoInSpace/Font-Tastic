@@ -49,8 +49,12 @@ export function HomeScreen({ onOpened, message }: Props) {
   const open = (path: string) => void run(() => api.open(path), path)
 
   const pickAndOpen = async () => {
-    const path = bridge ? await bridge.pick_project_file() : window.prompt('Path to a .fonttastic file or project folder')
-    if (path) open(path)
+    try {
+      const path = bridge ? await bridge.pick_project_file() : window.prompt('Path to a .fonttastic file or project folder')
+      if (path) open(path)
+    } catch (e) {
+      setError(`Couldn't show the Open dialog: ${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
   return (

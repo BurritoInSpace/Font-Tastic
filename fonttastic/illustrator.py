@@ -73,9 +73,17 @@ def open_in_illustrator(svg: Path) -> str:
     return "the default app"
 
 
+def reveal_command(path: Path) -> str:
+    """The Windows command line that opens Explorer with ``path`` selected."""
+    return f'explorer /select,"{Path(path).resolve()}"'
+
+
 def reveal_in_file_manager(path: Path):
     if sys.platform == "win32":
-        subprocess.Popen(["explorer", f"/select,{path}"])
+        # Explorer wants /select,"C:\path" with the quotes around the path only; passed
+        # as a list item, Python would quote the whole argument and Explorer
+        # would ignore it (just opening a window on its default folder).
+        subprocess.Popen(reveal_command(path))
     elif sys.platform == "darwin":
         subprocess.Popen(["open", "-R", str(path)])
     else:

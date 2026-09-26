@@ -2,6 +2,7 @@
 
 import os
 import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -108,3 +109,13 @@ def test_edit_endpoint(project, monkeypatch):
     assert client.post("/api/glyphs/nope/edit").status_code == 400
     monkeypatch.setattr(illustrator, "reveal_in_file_manager", lambda p: opened.append(("reveal", p)))
     assert client.post("/api/glyphs/uni05D0/reveal").status_code == 200
+
+
+def test_reveal_command_quotes_only_the_path():
+    # Explorer ignores /select when the whole argument is quoted, which is what
+    # subprocess does to a list item containing spaces.
+    path = Path("C:/My Fonts/Shalom Sans/glyphs/uni05D0.svg")
+    cmd = illustrator.reveal_command(path)
+    assert cmd.startswith('explorer /select,"')
+    assert cmd.endswith('uni05D0.svg"')
+    assert cmd.count('"') == 2

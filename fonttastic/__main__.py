@@ -40,7 +40,8 @@ class Bridge:
         import webview
 
         result = webview.windows[0].create_file_dialog(
-            webview.FileDialog.OPEN, file_types=("Font-tastic project (*.fonttastic)", "All files (*.*)")
+            # pywebview only allows letters, digits and spaces in the description
+            webview.FileDialog.OPEN, file_types=("Fonttastic project (*.fonttastic)", "All files (*.*)")
         )
         return result[0] if result else None
 

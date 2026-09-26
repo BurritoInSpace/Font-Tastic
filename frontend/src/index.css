@@ -248,6 +248,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .anchors tr.active td:first-child input { border-color: var(--ft-blue); box-shadow: inset 3px 0 0 var(--ft-blue); }
 .anchor-name { font-family: ui-monospace, Consolas, monospace; min-width: 64px; }
 .inspector select { flex: 1; min-width: 0; }
+.inspector select.alt-feature { flex: 0 0 auto; }
 .glyph-actions { gap: 6px; }
 
 /* preview: a resizable strip, then the controls bar -------------------------------- */

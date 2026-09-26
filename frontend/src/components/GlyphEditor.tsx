@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, type Anchor, type Glyph, type Project } from '../api'
+import { api, readBase64, type Anchor, type Glyph, type Project } from '../api'
 import { basesFor, glyphLabel, marksFor, STANDARD_ANCHORS } from '../glyphs'
+import { ALTERNATE_FEATURES, nextAlternateName } from '../importPlan'
 import { useConfirm } from './Confirm'
 import { ReassignDialog } from './ReassignDialog'
 
@@ -36,6 +37,10 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onO
     origin: Anchor
   } | null>(null)
   const nudgeTimer = useRef<number | undefined>(undefined)
+  const fileInput = useRef<HTMLInputElement>(null)
+  /** what the SVG picked in fileInput is for */
+  const [picking, setPicking] = useState<'replace' | 'alternate'>('replace')
+  const [altFeature, setAltFeature] = useState('salt')
 
   // Server state wins whenever the glyph (or the project revision) changes.
   useEffect(() => {
@@ -82,10 +87,16 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onO
     if (!d) return
     const p = toFont(e)
     d.moved = true
-    const moved = d.mode === 'mark'
-      // the mark follows the pointer, so its attachment anchor moves the other way
-      ? { x: d.origin.x - (p.x - d.start.x), y: d.origin.y - (p.y - d.start.y) }
-      : { x: p.x - viewOffset.x, y: p.y - viewOffset.y }
+    let dx = p.x - d.start.x
+    let dy = p.y - d.start.y
+    // Shift: straight lines, along whichever axis the pointer has moved further
+    if (e.shiftKey) {
+      if (Math.abs(dx) >= Math.abs(dy)) dy = 0
+      else dx = 0
+    }
+    // the mark follows the pointer, so its attachment anchor moves the other way
+    const sign = d.mode === 'mark' ? -1 : 1
+    const moved = { x: d.origin.x + sign * dx, y: d.origin.y + sign * dy }
     setAnchors((prev) => prev.map((a, j) => (j === d.index ? { ...a, ...moved } : a)))
   }
   const onPointerUp = () => {
@@ -219,6 +230,35 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onO
     }
   }
 
+  // Alternates hang off the plain glyph: uni05D0.salt is an alternate of uni05D0.
+  const baseName = glyph.name.split('.')[0]
+  const canAlternate = !glyph.auto && project.glyphs.some((g) => g.name === baseName && g.unicode !== null)
+  const pickSvg = (mode: 'replace' | 'alternate') => {
+    setPicking(mode)
+    fileInput.current?.click()
+  }
+  const svgPicked = async (file: File | undefined) => {
+    if (!file) return
+    try {
+      const data = await readBase64(file)
+      const target = picking === 'replace'
+        ? glyph.name
+        : nextAlternateName(baseName, altFeature, new Set(project.glyphs.map((g) => g.name)))
+      const res = await api.addGlyphFiles([{ data, glyphName: target, replace: picking === 'replace' }])
+      const failed = Object.values(res.errors)
+      if (failed.length) throw new Error(failed.join('; '))
+      onProject?.(res.project)
+      if (picking === 'replace') {
+        onMessage?.(`Replaced ${glyph.name} with ${file.name}; anchors and width kept (snapshot taken first)`)
+      } else {
+        onOpenGlyph?.(target)
+        onMessage?.(`Added ${target} from ${file.name}`)
+      }
+    } catch (e) {
+      onError(String(e))
+    }
+  }
+
   const inFont = new Set(project.glyphs.flatMap((g) => (g.unicode === null ? [] : [g.unicode])))
   const duplicateAs = async (cp: number) => {
     const nameOf = (u: number | null) => project.niqqud.find((n) => n.unicode === u)?.name
@@ -298,6 +338,27 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onO
             Show file
           </button>
         </div>
+        {!glyph.auto && (
+          <div className="row">
+            <button onClick={() => pickSvg('replace')} title="Swap in another SVG for this glyph; anchors and width stay">
+              Replace SVG…
+            </button>
+            {canAlternate && (
+              <>
+                <button onClick={() => pickSvg('alternate')}
+                  title={`Import an SVG as a stylistic alternate of ${baseName}`}>
+                  Add alternate…
+                </button>
+                <select className="alt-feature" value={altFeature} onChange={(e) => setAltFeature(e.target.value)} aria-label="Alternate feature"
+                  title="salt: stylistic alternate · ss01–ss20: stylistic sets">
+                  {ALTERNATE_FEATURES.map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </>
+            )}
+            <input ref={fileInput} type="file" accept=".svg,image/svg+xml" hidden
+              onChange={(e) => { void svgPicked(e.target.files?.[0]); e.target.value = '' }} />
+          </div>
+        )}
         {glyph.sourceMissing && (
           <p className="warnings">
             {glyph.source} was deleted or moved. The outline is kept; Edit in Illustrator writes a new SVG from it.
@@ -341,8 +402,8 @@ export function GlyphEditor({ project, glyph, onChanged, onError, onMessage, onO
         </div>
         <p className="hint">
           {attach
-            ? `Drag the mark onto ${attach.base.char || attach.base.name} to place it · arrow keys nudge the mark (Shift ×10)`
-            : 'Drag anchors on the canvas · arrow keys nudge (Shift ×10) · Delete removes'}
+            ? `Drag the mark onto ${attach.base.char || attach.base.name} to place it (Shift: straight line) · arrow keys nudge the mark (Shift ×10)`
+            : 'Drag anchors on the canvas (Shift: straight line) · arrow keys nudge (Shift ×10) · Delete removes'}
         </p>
 
         {!glyph.auto && glyph.name !== '.notdef' && (
