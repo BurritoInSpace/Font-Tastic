@@ -220,8 +220,8 @@ visual polish that the redesign will replace.
 ## Bilingual / multilingual fonts (Phase 3) — done for Hebrew + Latin family
 
 *Built: Hebrew with Latin, Greek and Cyrillic (script-generic). Accented
-letters are built from base letters and marks as components. Arabic and other
-joining scripts are out of scope.*
+letters are built from base letters and marks as components. Arabic is a
+side goal (below).*
 
 **The end goal:** use the app to build bilingual and eventually multilingual
 fonts, with Hebrew as the first script. The typical target is Hebrew + Latin
@@ -250,6 +250,23 @@ What it involves:
 Already compatible: glyph naming (`uni0061.svg`, `a.svg` and AGL names are
 already understood), the UFO data model, ufo2ft's feature writers (they
 split kern/mark lookups by script automatically), and HarfBuzz shaping.
+
+## Arabic (side goal, not urgent)
+
+Not planned for now; the author doesn't make Arabic fonts at the moment.
+What it would add on top of Phase 3, which already handles right-to-left
+text, bidi and marks:
+
+- **Joining forms:** each letter drawn up to four ways (isolated, initial,
+  medial, final: `uni0628.init.svg` etc.), with `init` / `medi` / `fina`
+  features generated from Unicode joining types.
+- **Cursive attachment:** `entry` / `exit` anchors joining letters along the
+  baseline (the `curs` feature), including kashida.
+- **Arabic marks:** harakat and their stacking (e.g. shadda with fatha), with
+  anchor seeding like niqqud.
+- **Required ligatures:** lam-alef (`rlig`) and optional ones.
+- **Arabic digits** and punctuation, shared with the Arabic-script rules
+  for number direction in the bidi preview.
 
 ## Recommended stack
 
