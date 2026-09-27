@@ -7,9 +7,9 @@
 
 # Font-tastic
 
-A Hebrew-first font editor. **Illustrator draws the glyph outlines; Font-tastic
-owns everything typographic**: metrics, niqqud anchors, kerning, ligatures,
-compilation, and a live RTL preview shaped by HarfBuzz.
+A Hebrew-first font editor. **Illustrator or Inkscape draws the glyph
+outlines; Font-tastic owns everything typographic**: metrics, niqqud anchors,
+kerning, ligatures, compilation, and a live RTL preview shaped by HarfBuzz.
 
 It isn't a Bezier editor and it isn't an Illustrator plugin. See
 [hebrew-font-editor-brief.md](hebrew-font-editor-brief.md) for the full design.
@@ -22,7 +22,24 @@ It isn't a Bezier editor and it isn't an Illustrator plugin. See
 > traditionally written project would get. Please judge it with that in
 > mind, and bug reports are welcome.
 
-## Setup (Windows)
+## Download
+
+Get the latest version from [Releases](https://github.com/BurritoInSpace/Font-Tastic/releases/latest)
+(Windows 10/11, 64-bit):
+
+- **`Font-tastic-<version>-setup.exe`**: the installer. Installs for your user
+  only (no admin rights), adds a Start menu entry, and can open `.fonttastic`
+  project files on double-click. Uninstall from *Settings › Apps*.
+- **`Font-tastic-<version>-windows.zip`**: portable. Extract anywhere and run
+  `Font-tastic.exe`.
+
+The app isn't code-signed yet, so the first time Windows SmartScreen says
+"Windows protected your PC": click **More info › Run anyway**. It needs
+Microsoft's WebView2 Runtime, which Windows 11 and current Windows 10 already
+have (the installer tells you if it's missing). You also need Illustrator or
+[Inkscape](https://inkscape.org) (free) to draw the letters.
+
+## Build from source (Windows)
 
 ```powershell
 python -m venv .venv
@@ -384,6 +401,21 @@ Phase 3, bilingual fonts: Hebrew with Latin (and Greek, Cyrillic) in one
 font: per-script glyph sections, anchors and language systems, accented
 letters built from parts, a bidi-aware preview, direction-aware kerning, and
 guides and side-by-side comparison for matching the scripts.
+
+## Making a release
+
+1. Set the new version in `fonttastic/__init__.py`, `pyproject.toml` and
+   `frontend/package.json`, and update `packaging/release-notes.md`.
+2. Try the build locally: `python packaging/build_exe.py --zip --installer`
+   (the installer needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
+3. Commit, then tag and push: `git tag v0.9.0` and `git push origin v0.9.0`.
+4. The **Release** workflow runs the tests, builds the zip and the installer
+   on GitHub and attaches them to a **draft** release. Check it on the
+   Releases page and click **Publish**.
+
+The build installs the exact package versions in
+`packaging/requirements-release.txt`, and ships the licence and a generated
+`THIRD_PARTY_NOTICES.txt` (every bundled library and font, with its licence).
 
 ## License
 

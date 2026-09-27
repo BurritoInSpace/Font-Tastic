@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import axes, illustrator, recent, variable
+from . import __version__, axes, illustrator, recent, variable
 from .build import CompileCache, CompileError, compile_otf, compile_ttf
 from .project import NeedsConversion, Project, ProjectError, glyph_preview
 from .watcher import GlyphWatcher
@@ -280,6 +280,10 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
         project = state.require()
         project.save_settings(values)
         return {"settings": project.settings}
+
+    @app.get("/api/version")
+    def version():
+        return {"version": __version__}
 
     @app.get("/api/recent")
     def get_recent():

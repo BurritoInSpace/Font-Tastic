@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fonttastic"
-version = "0.1.0"
+version = "0.9.0"
 description = "Hebrew-first font editor: Illustrator draws the outlines, Font-tastic owns everything typographic."
 requires-python = ">=3.11"
 license = { text = "GPL-3.0-or-later" }

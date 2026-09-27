@@ -23,10 +23,12 @@ export function HomeScreen({ onOpened, message }: Props) {
   const [convertPath, setConvertPath] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [version, setVersion] = useState<string | null>(null)
   const bridge = nativeBridge()
 
   useEffect(() => {
     api.recent().then((r) => setRecent(r.recent)).catch(() => setRecent([]))
+    api.version().then((v) => setVersion(v.version)).catch(() => {})
   }, [])
 
   const run = async (action: () => Promise<Opened>, pathForConversion?: string) => {
@@ -62,6 +64,7 @@ export function HomeScreen({ onOpened, message }: Props) {
       <header className="home-header">
         <img className="logo" src={logo} alt="" />
         <img className="wordmark" src={wordmark} alt="Font-tastic" />
+        {version && <span className="app-version">v{version}</span>}
         <a className="github" href={GITHUB_URL} target="_blank" rel="noreferrer" title="Font-tastic on GitHub">
           <svg viewBox={GITHUB_MARK_VIEWBOX} aria-hidden="true"><path d={GITHUB_MARK} /></svg>
         </a>

@@ -151,3 +151,15 @@ def test_recent_preview_thumbnail(tmp_path):
     recent.touch(p.file, "P")
     preview = client.get("/api/recent/preview", params={"path": str(p.file)}).json()["preview"]
     assert preview["name"] == "uni05D1" and preview["path"].startswith("M")  # no alef: first drawn glyph
+
+
+def test_version_is_the_same_everywhere():
+    import tomllib
+
+    from pathlib import Path
+
+    from fonttastic import __version__
+
+    root = Path(__file__).parent.parent
+    assert tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"] == __version__
+    assert json.loads((root / "frontend" / "package.json").read_text(encoding="utf-8"))["version"] == __version__

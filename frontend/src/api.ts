@@ -346,6 +346,7 @@ export const api = {
     call<{ changed: string[]; skipped: Record<string, string>; project: Project }>('POST', '/api/bulk/metrics', req),
   bulkAnchors: (req: { anchor: string; glyphs: string[]; x?: number | 'center'; y?: number; allMasters: boolean }) =>
     call<{ changed: string[]; project: Project }>('POST', '/api/bulk/anchors', req),
+  version: () => call<{ version: string }>('GET', '/api/version'),
   editors: () => call<EditorsInfo>('GET', '/api/editors'),
   setEditor: (choice: string) => call<EditorsInfo>('PUT', '/api/editors', { choice }),
   revealGlyph: (glyph: string) => call<{ path: string }>('POST', `/api/glyphs/${encodeURIComponent(glyph)}/reveal`),

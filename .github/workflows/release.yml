@@ -1,0 +1,81 @@
+# Builds the Windows release (portable zip + installer).
+#
+# - Push a tag like v0.9.0: tests run, both files are built and attached to a
+#   *draft* GitHub release, which you review and publish by hand.
+# - Run it by hand (Actions tab › Release › Run workflow): same build, the files
+#   are kept as a downloadable artifact of the run, no release.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python dependencies (exact versions)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r packaging/requirements-release.txt
+          python -m pip install --no-deps -e .
+
+      - name: Install UI dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Tests
+        run: python -m pytest -q
+
+      - name: Tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $version = python -c "import fonttastic; print(fonttastic.__version__)"
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "Tag ${{ github.ref_name }} doesn't match fonttastic.__version__ ($version)"
+          }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+
+      - name: Build exe, zip and installer
+        run: python packaging/build_exe.py --zip --installer
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: font-tastic-windows
+          path: |
+            dist/Font-tastic-*-windows.zip
+            dist/Font-tastic-*-setup.exe
+
+      - name: Draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: Font-tastic ${{ github.ref_name }}
+          body_path: packaging/release-notes.md
+          files: |
+            dist/Font-tastic-*-windows.zip
+            dist/Font-tastic-*-setup.exe
