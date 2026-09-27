@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, readBase64, type ChangeEvent, type CompatReport, type ImportReport, type Project } from './api'
+import { api, readBase64, type ChangeEvent, type CompatReport, type EditorsInfo, type ImportReport, type Project } from './api'
 import { logo, tabIcons } from './assets'
 import { describeLocation } from './axes'
 import { GlyphEditor } from './components/GlyphEditor'
 import { GlyphGrid } from './components/GlyphGrid'
 import { HomeScreen } from './components/HomeScreen'
 import { AccentsDialog } from './components/AccentsDialog'
+import { ActionsMenu, AnchorsDialog, SideBearingsDialog, type BulkAction } from './components/ActionsMenu'
 import { ExportDialog } from './components/ExportDialog'
 import { ImportDialog, type Upload } from './components/ImportDialog'
 import { InfoPanel } from './components/InfoPanel'
@@ -38,7 +39,9 @@ export default function App() {
   const [exporting, setExporting] = useState(false)
   const [showPoints, setShowPoints] = useState(false)
   const [accenting, setAccenting] = useState(false)
+  const [bulk, setBulk] = useState<BulkAction | null>(null)
   const [compare, setCompare] = useState('')
+  const [editors, setEditors] = useState<EditorsInfo | null>(null)
   const revision = useRef<number | null>(null)
   revision.current = project?.revision ?? null
 
@@ -49,6 +52,7 @@ export default function App() {
 
   useEffect(() => {
     refresh().finally(() => setLoading(false))
+    api.editors().then(setEditors).catch(() => {})
   }, [refresh])
 
   // Live updates: the server watches glyphs/ and says when the project changed.
@@ -166,6 +170,25 @@ export default function App() {
     }
   }
 
+  const matchAll = async () => {
+    try {
+      const res = await api.fixAll()
+      setProject(res.project)
+      setCompat(res.compat)
+      const failed = Object.entries(res.errors)
+      if (failed.length) onError(`Couldn't match ${failed.map(([g, m]) => `${g} (${m})`).join('; ')}`)
+      else setMessage({ text: res.fixed.length ? `Matched ${res.fixed.join(', ')} to the default master` : 'Nothing to fix' })
+    } catch (e) {
+      onError(String(e))
+    }
+  }
+
+  const bulkDone = (next: Project, text: string) => {
+    setBulk(null)
+    setProject(next)
+    setMessage({ text })
+  }
+
   const exported = (res: { paths: string[]; bytes: number; variableNote: string | null }) => {
     setExporting(false)
     const names = res.paths.map((p) => p.split(/[\\/]/).pop())
@@ -184,7 +207,12 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <img className="topbar-logo" src={logo} alt="Font-tastic" />
+        <ActionsMenu project={project} logo={logo} onAction={(a) => {
+          if (a === 'accents') setAccenting(true)
+          else if (a === 'reimport') void reimport(true)
+          else if (a === 'match') void matchAll()
+          else setBulk(a)
+        }} />
         <div className="topbar-title">
           <div className="font-name" title={project.file}>{project.name}</div>
           <select className="weight-menu" value={project.weight} title="Master being edited"
@@ -210,7 +238,7 @@ export default function App() {
             </span>
           )}
           <span className={`live${watching ? ' on' : ''}`}
-            title={watching ? 'Watching the glyph folder: SVGs saved in Illustrator update here automatically'
+            title={watching ? 'Watching the glyph folders: SVGs saved in your drawing app update here automatically'
               : 'Not watching for changes; use Reimport'}>
             {watching ? 'Live' : 'Not live'}
           </span>
@@ -240,7 +268,7 @@ export default function App() {
               <GlyphEditor project={project} glyph={glyph} onChanged={refresh} onError={onError}
                 onMessage={(text) => setMessage({ text })} onOpenGlyph={setSelected} onProject={setProject}
                 showPoints={showPoints} onShowPoints={setShowPoints} compat={compat}
-                compare={compare} onCompare={setCompare} />
+                compare={compare} onCompare={setCompare} editorLabel={editors?.label} />
             ) : (
               <div className="empty">Pick a glyph on the left to place its anchors.</div>
             ))}
@@ -258,7 +286,7 @@ export default function App() {
           )}
           {tab === 'project' && (
             <div className="panel-page">
-            <InfoPanel project={project} onError={onError} onRestored={setProject}
+            <InfoPanel project={project} onError={onError} onRestored={setProject} editors={editors} onEditors={setEditors}
               onDeleteWeight={async (name) => {
                 try {
                   const res = await api.deleteWeight(name)
@@ -288,6 +316,15 @@ export default function App() {
       {exporting && (
         <ExportDialog project={project} compat={compat} onCancel={() => setExporting(false)} onDone={exported}
           onError={(m) => { setExporting(false); onError(m) }} />
+      )}
+
+      {bulk === 'sidebearings' && (
+        <SideBearingsDialog project={project} onCancel={() => setBulk(null)} onDone={bulkDone}
+          onError={(m) => { setBulk(null); onError(m) }} />
+      )}
+      {bulk === 'anchors' && (
+        <AnchorsDialog project={project} onCancel={() => setBulk(null)} onDone={bulkDone}
+          onError={(m) => { setBulk(null); onError(m) }} />
       )}
 
       {accenting && (

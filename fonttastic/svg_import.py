@@ -127,11 +127,12 @@ def parse_svg(data: bytes, ascender: float, descender: float) -> ImportedOutline
     # How far apart two coordinates can be and still have been the same point
     # before Illustrator rounded them, in font units.
     grid = scale * 10 ** -decimals
-    if elements and grid > 1.01:
+    if elements and decimals and grid > 1.01:  # whole numbers alone may just be a grid, not rounding
         warnings.append(
             f"Points are rounded to {grid:.3g} font units: the artboard is {vb_h:g} px tall and the SVG has "
-            f"{decimals} decimal place{'s' if decimals != 1 else ''}. In Illustrator's SVG options, raise "
-            "Decimal Places (or make the artboard 1000 px tall) so points land exactly.")
+            f"{decimals} decimal place{'s' if decimals != 1 else ''}. Save with more decimals (Illustrator: SVG "
+            "options, Decimal Places; Inkscape: Preferences, Input/Output, SVG output, Numeric precision), or "
+            "make the artboard 1000 px tall, so points land exactly.")
     snap = max(2.0, grid * 1.5)
     elements = [([_close_exactly(c, snap) for c in cs], rule) for cs, rule in elements]
 
@@ -292,6 +293,49 @@ def _length(value: str | None) -> float | None:
         return None
     m = _NUM.match(value.strip())
     return float(m.group()) if m else None
+
+
+def artboard(data: bytes) -> tuple[float, float, float, float]:
+    """The SVG's artboard (viewBox) as x, y, width, height in SVG units."""
+    return _viewbox(ET.fromstring(data))
+
+
+def _fmt(value: float) -> str:
+    return f"{value:.4f}".rstrip("0").rstrip(".") or "0"
+
+
+def move_artboard(data: bytes, dx: float, width: float) -> bytes:
+    """The same SVG with its artboard's left edge moved by ``dx`` and its
+    width set to ``width`` (SVG units); the artwork stays where it is.
+
+    Only the root ``<svg>`` tag changes: ``viewBox``, a ``width`` attribute
+    (scaled, keeping its unit) and Illustrator's ``enable-background``.
+    Everything else is kept byte for byte.
+    """
+    text = data.decode("utf-8")
+    start = text.index("<svg")
+    end = text.index(">", start)
+    tag = text[start:end]
+    x, y, w, h = artboard(data)
+    new_box = f"{_fmt(x + dx)} {_fmt(y)} {_fmt(width)} {_fmt(h)}"
+
+    def set_attr(tag: str, name: str, value: str) -> str:
+        pattern = re.compile(rf'(\s{name}\s*=\s*)(["\'])(.*?)\2', re.S)
+        if pattern.search(tag):
+            return pattern.sub(lambda m: f"{m.group(1)}{m.group(2)}{value}{m.group(2)}", tag, count=1)
+        return f'{tag} {name}="{value}"'
+
+    tag = set_attr(tag, "viewBox", new_box)
+    width_attr = re.search(r'\swidth\s*=\s*(["\'])(.*?)\1', tag)
+    if width_attr:
+        old = width_attr.group(2)
+        number = _length(old)
+        if number:
+            unit = old.strip()[len(_NUM.match(old.strip()).group()):]
+            tag = set_attr(tag, "width", f"{_fmt(number * width / w)}{unit}")
+    tag = re.sub(r"(enable-background\s*[:=]\s*[\"']?\s*new\s+)[-\d.eE+\s]+",
+                 lambda m: f"{m.group(1)}{new_box}", tag)
+    return (text[:start] + tag + text[end:]).encode("utf-8")
 
 
 def _viewbox(root):

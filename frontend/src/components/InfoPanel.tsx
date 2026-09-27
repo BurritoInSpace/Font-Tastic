@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, type FontInfo, type Guide, type Project, type Snapshot } from '../api'
+import { api, type EditorsInfo, type FontInfo, type Guide, type Project, type Snapshot } from '../api'
 import { describeLocation } from '../axes'
 import { useConfirm } from './Confirm'
 import { CommitInput } from './GlyphEditor'
@@ -20,9 +20,11 @@ interface Props {
   onRestored: (project: Project) => void
   onError: (msg: string) => void
   onDeleteWeight: (name: string) => void
+  editors?: EditorsInfo | null
+  onEditors?: (info: EditorsInfo) => void
 }
 
-export function InfoPanel({ project, onChanged, onRestored, onError, onDeleteWeight }: Props) {
+export function InfoPanel({ project, onChanged, onRestored, onError, onDeleteWeight, editors, onEditors }: Props) {
   const confirm = useConfirm()
   const [draft, setDraft] = useState<FontInfo>(project.info)
   useEffect(() => setDraft(project.info), [project.info])
@@ -65,12 +67,34 @@ export function InfoPanel({ project, onChanged, onRestored, onError, onDeleteWei
         ))}
       </div>
       <p className="muted">
-        The Illustrator artboard maps top edge → ascender, bottom edge → descender. Changing either rescales every
+        The SVG artboard (Illustrator artboard, Inkscape page) maps top edge → ascender, bottom edge → descender. Changing either rescales every
         outline, so saving re-imports all SVGs (a snapshot is taken first). Anchors and widths you set in-app are kept.
       </p>
       <div className="row">
         <button className="primary" disabled={!dirty} onClick={() => void save()}>Save</button>
       </div>
+
+      {editors && (
+        <>
+          <h4>Drawing app</h4>
+          <div className="row">
+            <select value={editors.choice} aria-label="Drawing app"
+              onChange={async (e) => {
+                try {
+                  onEditors?.(await api.setEditor(e.target.value))
+                } catch (err) {
+                  onError(String(err))
+                }
+              }}>
+              <option value="auto">Automatic ({editors.installed[editors.active] ?? editors.label})</option>
+              {Object.entries(editors.installed).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+            <span className="muted small">
+              What Edit opens glyph SVGs in (Ctrl+E). A setting for this computer, not the project.
+            </span>
+          </div>
+        </>
+      )}
 
       <h4>Guides</h4>
       <p className="muted small">

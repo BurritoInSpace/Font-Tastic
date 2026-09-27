@@ -1,18 +1,25 @@
-"""Open glyph SVGs in Adobe Illustrator — a plain OS-level launch, no Adobe API.
+"""Open glyph SVGs in a drawing app: Adobe Illustrator or Inkscape (a plain
+OS-level launch, no plugin or API). The app saves back to the same file and
+the glyph watcher re-imports it, the same round trip Photoshop uses for linked
+Smart Objects.
 
-Illustrator saves back to the same file and the glyph watcher re-imports it,
-the same round trip Photoshop uses for linked Smart Objects.
+Which app is a per-user preference (``editor`` in preferences.json):
+``illustrator``, ``inkscape``, ``default`` (whatever the OS opens .svg with),
+or ``auto``: Illustrator if installed, else Inkscape, else the default app.
 
-The Illustrator used is, in order: the ``FONTTASTIC_ILLUSTRATOR`` environment
-variable (path to Illustrator.exe), else the newest release found under
-Program Files (betas only if nothing else is installed). If none is found,
-the file opens in whatever app Windows associates with .svg.
+The Illustrator used is the ``FONTTASTIC_ILLUSTRATOR`` environment variable
+(path to Illustrator.exe), else the newest release found under Program Files
+(betas only if nothing else is installed). Inkscape is
+``FONTTASTIC_INKSCAPE``, else its standard install location, else ``inkscape``
+on the PATH.
 """
 
 from __future__ import annotations
 
 import os
+import json
 import re
+import shutil
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -108,6 +115,101 @@ def _launch(app: Illustrator | None, svg: Path, env) -> str:
         return "the default app for .svg"
     subprocess.Popen(["xdg-open", str(svg)])
     return "the default app"
+
+
+# -- Inkscape and the choice of app -------------------------------------------------
+
+EDITORS = {"illustrator": "Adobe Illustrator", "inkscape": "Inkscape", "default": "the default app for .svg"}
+
+
+def find_inkscape(search_dirs: list[Path] | None = None) -> Path | str | None:
+    """Inkscape's executable (a path, or on macOS the app name to launch), or None."""
+    if override := os.environ.get("FONTTASTIC_INKSCAPE"):
+        path = Path(override)
+        return path if path.is_file() else None
+    if sys.platform == "darwin" and search_dirs is None:
+        return "Inkscape" if Path("/Applications/Inkscape.app").exists() else None
+    if search_dirs is None:
+        roots = [os.environ.get(v) for v in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)")]
+        local = os.environ.get("LOCALAPPDATA")
+        search_dirs = [Path(r) / "Inkscape" for r in roots if r] + ([Path(local) / "Programs" / "Inkscape"] if local else [])
+    for base in search_dirs:
+        for exe in (base / "bin" / "inkscape.exe", base / "inkscape.exe"):
+            if exe.is_file():
+                return exe
+    found = shutil.which("inkscape") if sys.platform != "win32" else None
+    return Path(found) if found else None
+
+
+def _preferences_path() -> Path:
+    from .recent import config_dir
+
+    return config_dir() / "preferences.json"
+
+
+def preferences() -> dict:
+    try:
+        data = json.loads(_preferences_path().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def set_editor(choice: str):
+    if choice != "auto" and choice not in EDITORS:
+        raise ValueError(f"Unknown drawing app {choice!r}")
+    prefs = {**preferences(), "editor": choice}
+    path = _preferences_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(prefs, indent=2), encoding="utf-8")
+
+
+def installed() -> dict[str, str]:
+    """The apps available here: id -> name (the default app is always there)."""
+    out = {}
+    if (app := find_illustrator()) is not None:
+        out["illustrator"] = app.name
+    if find_inkscape() is not None:
+        out["inkscape"] = "Inkscape"
+    out["default"] = EDITORS["default"]
+    return out
+
+
+def resolve(choice: str | None = None) -> str:
+    """The app to use: the preference (or ``choice``), falling back through
+    Illustrator, Inkscape and the default app when it isn't installed."""
+    choice = choice or preferences().get("editor", "auto")
+    have = installed()
+    if choice in have:
+        return choice
+    return next(e for e in ("illustrator", "inkscape", "default") if e in have)
+
+
+def open_svg(svg: Path) -> str:
+    """Open ``svg`` in the chosen drawing app. Returns the app's name."""
+    editor = resolve()
+    if editor == "illustrator":
+        return open_in_illustrator(svg)
+    if editor == "inkscape":
+        return open_in_inkscape(svg)
+    with _outside_bundle():
+        if sys.platform == "win32":
+            os.startfile(svg)  # noqa: S606 — the user's own file, in their default app
+        else:
+            subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(svg)])
+    return EDITORS["default"]
+
+
+def open_in_inkscape(svg: Path) -> str:
+    exe = find_inkscape()
+    if exe is None:
+        raise OSError("Inkscape isn't installed (or set FONTTASTIC_INKSCAPE to inkscape.exe)")
+    with _outside_bundle() as env:
+        if isinstance(exe, str):  # macOS app name
+            subprocess.Popen(["open", "-a", exe, str(svg)])
+        else:
+            subprocess.Popen([str(exe), str(svg)], close_fds=True, env=env, cwd=Path.home())
+    return "Inkscape"
 
 
 def reveal_command(path: Path) -> str:

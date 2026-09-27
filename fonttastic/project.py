@@ -42,7 +42,7 @@ from fontTools.pens.svgPathPen import SVGPathPen
 
 from . import axes, composites, features, hebrew, naming, resequence, scripts
 from .errors import ProjectError
-from .svg_import import outline_to_svg, parse_svg, read_svg
+from .svg_import import artboard, move_artboard, outline_to_svg, parse_svg, read_svg
 
 LIB = "com.fonttastic"
 SOURCE = f"{LIB}.source"
@@ -970,6 +970,130 @@ class Project:
                 glyph.width = round(width)
                 glyph.lib[WIDTH_OVERRIDE] = True
             self._commit()
+
+    def set_metrics(self, name: str, lsb: float | None = None, rsb: float | None = None,
+                    width: float | None = None) -> dict:
+        """Set side bearings or width by moving the edges of the glyph's
+        artboard in its SVG (in the weight being edited). The drawing keeps
+        its place in the file; in the font it moves by the change in left
+        side bearing, anchors with it. Left side bearing changes keep the
+        right one, and the other way round; a width change keeps the left.
+        A glyph without an SVG can only have its width set."""
+        with self.lock:
+            if not self.has_source(name):
+                if lsb is not None or rsb is not None or width is None:
+                    raise ProjectError(f"{name} has no SVG artboard to move; only its width can be set")
+                self.set_width(name, width)
+                return self.glyph_detail(name)
+            self._metrics_here(name, lsb, rsb, width)
+            self._commit()
+            return self.glyph_detail(name)
+
+    def _metrics_here(self, name: str, lsb, rsb, width):
+        """``set_metrics`` in the active weight, without saving."""
+        glyph = self.glyph(name)
+        bounds = _bounds(glyph, self.font)
+        ink_min, ink_max = (bounds[0], bounds[2]) if bounds else (0, 0)
+        cur_lsb, cur_rsb = ink_min, glyph.width - ink_max
+        new_lsb = cur_lsb if lsb is None else lsb
+        if rsb is not None:
+            new_rsb = rsb
+        elif width is not None:
+            new_rsb = width - (ink_max - ink_min) - new_lsb
+        else:
+            new_rsb = cur_rsb
+        new_width = new_lsb + (ink_max - ink_min) + new_rsb
+        if new_width <= 0:
+            raise ProjectError("That would make the glyph's width zero or less")
+        shift = new_lsb - cur_lsb  # the drawing moves right by this, in font units
+
+        path = self.glyphs_dir / glyph.lib[SOURCE]
+        data = path.read_bytes()
+        info = self.font.info
+        scale = (info.ascender - info.descender) / artboard(data)[3]
+        path.write_bytes(move_artboard(data, -shift / scale, new_width / scale))
+        for anchor in glyph.anchors:
+            anchor.x = round(anchor.x + shift)
+        glyph.lib.pop(WIDTH_OVERRIDE, None)
+        self._import_glyph(path, naming.parse_filename(path.stem))
+
+    # -- bulk actions -----------------------------------------------------------------
+
+    def _bulk(self, fn, all_masters: bool):
+        """Run ``fn()`` in the active master, or in every master; each saves once."""
+        if all_masters:
+            self._each_weight(fn)
+        else:
+            fn()
+            self._commit()
+
+    def bulk_metrics(self, names: list[str], lsb: float | None = None, rsb: float | None = None,
+                     all_masters: bool = False) -> dict:
+        """Set the left and/or right side bearing of many glyphs (each by
+        moving its SVG artboard's edges). Marks, accented letters built from
+        parts, empty glyphs and glyphs without an SVG are skipped. A snapshot
+        is taken first. Returns ``{"changed": [...], "skipped": {name: why}}``."""
+        if lsb is None and rsb is None:
+            raise ProjectError("Give a left or right side bearing (or both)")
+        with self.lock:
+            changed, skipped = set(), {}
+
+            def here():
+                present = [n for n in names if n in self.font]
+                svgs = [self.glyphs_dir / self.font[n].lib[SOURCE] for n in present if self.has_source(n)]
+                self.snapshot(f"Before setting side bearings of {len(present)} glyphs", svgs)
+                for n in present:
+                    g = self.font[n]
+                    why = ("built from parts" if composites.COMPOSITE in g.lib
+                           else "a mark" if naming.category_for(naming.parse_filename(n)) == "mark"
+                           else "no SVG" if not self.has_source(n)
+                           else "empty" if _bounds(g, self.font) is None else None)
+                    if why:
+                        skipped[n] = why
+                        continue
+                    try:
+                        self._metrics_here(n, lsb, rsb, None)
+                        changed.add(n)
+                    except ProjectError as exc:
+                        skipped[n] = str(exc)
+
+            self._bulk(here, all_masters)
+            return {"changed": sorted(changed), "skipped": skipped}
+
+    def bulk_anchors(self, anchor: str, names: list[str] | None = None, x=None, y=None,
+                     all_masters: bool = False) -> dict:
+        """Line up one anchor across many glyphs: ``x`` is a number, or
+        ``"center"`` for the middle of each glyph's drawing, or None to keep;
+        ``y`` is a number or None to keep. ``names`` limits it to some glyphs
+        (default: every glyph with that anchor). A snapshot is taken first.
+        Returns ``{"changed": [...]}``."""
+        if x is None and y is None:
+            raise ProjectError("Give a position to move the anchors to")
+        if x is not None and x != "center" and not isinstance(x, (int, float)):
+            raise ProjectError("x must be a number or center")
+        with self.lock:
+            changed = set()
+
+            def here():
+                self.snapshot(f"Before lining up the {anchor} anchors")
+                for g in self.font:
+                    if names is not None and g.name not in names:
+                        continue
+                    for a in g.anchors:
+                        if a.name != anchor:
+                            continue
+                        if x == "center":
+                            bounds = _bounds(g, self.font)
+                            if bounds:
+                                a.x = round((bounds[0] + bounds[2]) / 2)
+                        elif x is not None:
+                            a.x = round(x)
+                        if y is not None:
+                            a.y = round(y)
+                        changed.add(g.name)
+
+            self._bulk(here, all_masters)
+            return {"changed": sorted(changed)}
 
     def set_info(self, values: dict):
         """Family name and vertical metrics apply to every weight; the style

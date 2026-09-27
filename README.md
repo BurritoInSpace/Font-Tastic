@@ -232,6 +232,22 @@ Further alternates in the same feature are numbered (`uni05D1.salt.2`) and
 all show up in `salt`'s alternate list. A new alternate starts with its base
 glyph's anchors.
 
+### Actions for many glyphs (the logo menu)
+
+Click the logo at the top left for actions that work on many glyphs at once.
+Each takes a snapshot first (undo from the Project tab) and can apply to the
+master you're editing or to every master. Pick the glyphs by glyph panel
+section, all of them, or by typing the letters.
+
+- **Spacing › Set side bearings…:** the same left and/or right side bearing
+  for many glyphs, by moving each SVG's artboard edges.
+- **Anchors › Line up anchors…:** one anchor (e.g. `_bottom` on every mark,
+  `top` on every letter) set to the same height, optionally centred on each
+  drawing.
+- **Point order › Match every master to the default:** the variable tab's
+  Fix all.
+- **Glyphs:** build accented letters; re-read every SVG.
+
 ### Fixing and removing glyphs
 
 - **Reassign…** (in the glyph's inspector) is for a glyph that was named or
@@ -248,23 +264,34 @@ glyph's anchors.
 - Both take a snapshot first (including the SVG files), so they can be
   undone from the Project tab.
 
-### Drawing in Illustrator
+### Drawing in Illustrator or Inkscape
 
 - **The artboard is the glyph cell.** The top edge is the ascender, the bottom
   edge is the descender, and the width is the advance width. With the default
   metrics (ascender 800, descender −200) a 1000 pt tall artboard is 1:1, with
   the baseline 800 pt from the top.
+- Any artboard size works, since it's scaled to the em. On small artboards
+  (e.g. 10 px tall) set **Decimal Places** to 3 in the SVG options, or points
+  get rounded to a coarse grid; the glyph shows a warning when they are.
+- **Side bearings:** the glyph panel shows LSB · Width · RSB. Changing them, or
+  dragging the left or right edge of the advance box on the canvas, moves that
+  edge of the artboard in the SVG itself (the drawing stays put), so
+  Illustrator shows the same artboard next time. A change to the left side
+  keeps the right side bearing, and moves the anchors with the glyph. If the
+  SVG is open in Illustrator, close it first, or saving there puts the old
+  artboard back.
 - Draw niqqud where they would sit under or over a letter standing on the
   baseline. Their advance width is set to zero automatically.
-- Overlapping shapes are fine because they're merged on import. Strokes
-  aren't: use *Object › Path › Outline Stroke*. Hidden layers are skipped.
+- Overlapping shapes are fine: they're kept as drawn (variable fonts need
+  that) and merged when static fonts are exported. Strokes aren't: use
+  *Object › Path › Outline Stroke*. Hidden layers are skipped.
 - Save As SVG with **Preserve Illustrator Editing Capabilities** on, so the
   file keeps reopening cleanly in Illustrator.
 
-### Editing in Illustrator (live round trip)
+### Editing in Illustrator or Inkscape (live round trip)
 
-Select a glyph and click **Edit in Illustrator** (or press Ctrl+E). Its SVG
-opens in your newest installed Illustrator, and each time you save there,
+Select a glyph and click **Edit in Illustrator** or **Edit in Inkscape** (or
+press Ctrl+E). Its SVG opens in the drawing app, and each time you save there,
 the glyph updates in Font-tastic within a second or two. There's no
 re-import step: the app watches `glyphs/`, re-reads only the changed files,
 and keeps your anchors and widths. Files added to or edited in `glyphs/` by
@@ -276,11 +303,17 @@ toolbar shows the watcher is running.
   right size, so you can start from what's there. A deleted source is
   marked with a red **?** in the glyph list.
 - **Show file** reveals the glyph's SVG in Explorer.
-- To use a specific Illustrator, set `FONTTASTIC_ILLUSTRATOR` to its
-  `Illustrator.exe`. With no Illustrator installed, the file opens in the
-  default app for `.svg`.
+- **Which app:** the Project tab's **Drawing app** setting (for this
+  computer, not the project): Automatic uses Illustrator if it's installed,
+  else Inkscape, else the default app for `.svg`. Adobe isn't needed:
+  Inkscape (free) works the same way.
+- To use a specific install, set `FONTTASTIC_ILLUSTRATOR` to `Illustrator.exe`
+  or `FONTTASTIC_INKSCAPE` to `inkscape.exe`.
 - When Illustrator asks for SVG options on save, keep **Preserve Illustrator
   Editing Capabilities** on.
+- In Inkscape, the page is the glyph cell (*Document Properties* sets its
+  size); strokes need *Path › Stroke to Path*; saving as Inkscape SVG or
+  plain SVG both work, and hidden layers are skipped.
 
 ### Anchors
 

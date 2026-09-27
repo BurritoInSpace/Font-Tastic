@@ -1,6 +1,7 @@
 """Filesystem watcher, glyph -> SVG export, Illustrator discovery and the edit endpoint."""
 
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -126,7 +127,7 @@ def test_illustrator_override(tmp_path, monkeypatch):
 
 def test_edit_endpoint(project, monkeypatch):
     opened = []
-    monkeypatch.setattr(illustrator, "open_in_illustrator", lambda p: opened.append(p) or "Adobe Illustrator 2026")
+    monkeypatch.setattr(illustrator, "open_svg", lambda p: opened.append(p) or "Adobe Illustrator 2026")
     client = TestClient(create_app(project, watch=False))
 
     r = client.post("/api/glyphs/uni05D0/edit").json()
@@ -149,3 +150,23 @@ def test_reveal_command_quotes_only_the_path():
     assert cmd.startswith('explorer /select,"')
     assert cmd.endswith('uni05D0.svg"')
     assert cmd.count('"') == 2
+
+
+def test_find_inkscape(tmp_path, monkeypatch):
+    monkeypatch.delenv("FONTTASTIC_INKSCAPE", raising=False)
+    exe = tmp_path / "Inkscape" / "bin" / "inkscape.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    assert illustrator.find_inkscape([tmp_path / "Inkscape"]) == exe
+    assert illustrator.find_inkscape([tmp_path / "nothing"]) is None or sys.platform != "win32"
+
+
+def test_editor_choice_falls_back_to_what_is_installed(monkeypatch):
+    monkeypatch.setattr(illustrator, "installed", lambda: {"inkscape": "Inkscape", "default": "the default app"})
+    assert illustrator.resolve() == "inkscape"  # auto: no Illustrator here
+    illustrator.set_editor("illustrator")
+    assert illustrator.resolve() == "inkscape"  # chosen but not installed
+    illustrator.set_editor("default")
+    assert illustrator.resolve() == "default"
+    with pytest.raises(ValueError):
+        illustrator.set_editor("photoshop")

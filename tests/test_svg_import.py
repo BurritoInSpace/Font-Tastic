@@ -130,3 +130,8 @@ def test_coarse_rounding_is_reported():
     out = parse_svg(small("M1.1,1 L5,1 L5,5 L1,5 Z"), ASC, DESC)  # 1 decimal on a 10 px artboard
     assert len(out.warnings) == 1 and "rounded to 10 font units" in out.warnings[0]
     assert parse_svg(small("M1.12,1 L5,1 L5,5 L1,5 Z"), ASC, DESC).warnings == []
+
+
+def test_whole_numbers_alone_are_not_called_rounding():
+    # e.g. drawn on a grid in Inkscape: nothing shows the coordinates were rounded
+    assert parse_svg(small("M1,1 L5,1 L5,5 L1,5 Z"), ASC, DESC).warnings == []

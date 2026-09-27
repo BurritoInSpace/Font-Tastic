@@ -567,3 +567,34 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .compare-row label { white-space: nowrap; }
 .guides-table { width: auto; align-self: flex-start; }
 .guides-table td.num-cell input { width: 80px; }
+
+/* Side bearings */
+.metrics-field { display: flex; flex-direction: column; gap: 4px; }
+.metrics-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.metrics-row label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--fg-muted); }
+.metrics-row input { width: 100%; }
+.canvas .edge-handle { fill: transparent; cursor: ew-resize; }
+.canvas .edge-handle:hover { fill: var(--ft-yellow); fill-opacity: 0.25; }
+.canvas .drag-readout { pointer-events: none; }
+.canvas .drag-readout rect { fill: var(--ft-yellow); }
+.canvas .drag-readout text { fill: var(--ft-black); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Actions menu (the logo) and bulk dialogs */
+.actions-menu { position: relative; }
+.logo-button { display: flex; align-items: center; gap: 4px; background: none; border: none; padding: 2px 4px; cursor: pointer; }
+.logo-button:hover, .logo-button[aria-expanded='true'] { background: rgba(255, 255, 255, 0.08); }
+.logo-button .caret { color: var(--ft-yellow); font-size: 12px; }
+.actions-menu .menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 50; width: 330px; background: var(--ft-black);
+  border: 1px solid #555; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); padding: 6px 0; }
+.menu-group + .menu-group { border-top: 1px solid #444; margin-top: 4px; padding-top: 4px; }
+.menu-title { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ft-yellow); padding: 4px 14px; }
+.actions-menu .menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; text-align: left;
+  background: none; border: none; color: var(--ft-white); padding: 6px 14px; }
+.actions-menu .menu button:hover:not(:disabled) { background: #3f3f3f; }
+.actions-menu .menu button:disabled { opacity: 0.45; }
+.menu-hint { font-size: 11px; color: #a8a8a8; }
+.bulk-dialog { width: min(560px, 100%); }
+.bulk-body { padding: 4px 22px 18px; display: flex; flex-direction: column; gap: 12px; }
+.bulk-body .field, .scope label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--fg-muted); }
+.bulk-body input.num { width: 110px; }
+.scope { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }

@@ -29,6 +29,17 @@ export interface Glyph {
   composite: { base: string; marks: string[] } | null
 }
 
+/** The drawing apps: which are installed, the user's choice, and the one that will open. */
+export interface EditorsInfo {
+  /** auto, illustrator, inkscape or default */
+  choice: string
+  /** id -> name, e.g. { illustrator: "Adobe Illustrator 2026", inkscape: "Inkscape", default: "..." } */
+  installed: Record<string, string>
+  active: string
+  /** short name for buttons: Illustrator, Inkscape or default app */
+  label: string
+}
+
 /** An accented letter the font could build from letters and marks it has. */
 export interface CompositeCandidate {
   unicode: number
@@ -331,9 +342,18 @@ export const api = {
     call<{ added: string[]; errors: Record<string, string>; project: Project }>('POST', '/api/composites', { unicodes }),
   drawInstead: (glyph: string) =>
     call<{ path: string; app: string; project: Project }>('POST', `/api/glyphs/${encodeURIComponent(glyph)}/draw-instead`),
+  bulkMetrics: (req: { glyphs: string[]; lsb?: number; rsb?: number; allMasters: boolean }) =>
+    call<{ changed: string[]; skipped: Record<string, string>; project: Project }>('POST', '/api/bulk/metrics', req),
+  bulkAnchors: (req: { anchor: string; glyphs: string[]; x?: number | 'center'; y?: number; allMasters: boolean }) =>
+    call<{ changed: string[]; project: Project }>('POST', '/api/bulk/anchors', req),
+  editors: () => call<EditorsInfo>('GET', '/api/editors'),
+  setEditor: (choice: string) => call<EditorsInfo>('PUT', '/api/editors', { choice }),
   revealGlyph: (glyph: string) => call<{ path: string }>('POST', `/api/glyphs/${encodeURIComponent(glyph)}/reveal`),
   setAnchors: (glyph: string, anchors: Anchor[]) =>
     call<Glyph>('PUT', `/api/glyphs/${encodeURIComponent(glyph)}/anchors`, { anchors }),
+  /** Side bearings / width: moves the edges of the glyph's SVG artboard (width only for glyphs without one). */
+  setMetrics: (glyph: string, values: { lsb?: number; rsb?: number; width?: number }) =>
+    call<Glyph>('PUT', `/api/glyphs/${encodeURIComponent(glyph)}/metrics`, values),
   setWidth: (glyph: string, width: number | null) =>
     call<Glyph>('PUT', `/api/glyphs/${encodeURIComponent(glyph)}/width`, { width }),
   setInfo: (info: Partial<FontInfo>) => call<Project>('PUT', '/api/info', info),

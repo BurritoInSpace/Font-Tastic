@@ -23,14 +23,17 @@ interface Props {
   /** letters shown faintly beside the glyph, to compare heights and weight across scripts */
   compare?: string
   onCompare?: (text: string) => void
+  /** the drawing app "Edit in" opens: Illustrator, Inkscape or default app */
+  editorLabel?: string
 }
 
 const PAD = 160
 
 export function GlyphEditor({
   project, glyph, onChanged, onError, onMessage, onOpenGlyph, onProject, showPoints = false, onShowPoints, compat,
-  compare = '', onCompare,
+  compare = '', onCompare, editorLabel = 'Illustrator',
 }: Props) {
+  const editIn = editorLabel === 'default app' ? 'Open in default app' : `Edit in ${editorLabel}`
   const [reassigning, setReassigning] = useState(false)
   const confirm = useConfirm()
   const [anchors, setAnchors] = useState<Anchor[]>(glyph.anchors)
@@ -105,13 +108,13 @@ export function GlyphEditor({
   const byName = new Map(project.glyphs.map((g) => [g.name, g]))
   const composite = glyph.composite
 
-  /** A built accented letter becomes an SVG (in every weight) and opens in Illustrator. */
+  /** A built accented letter becomes an SVG (in every weight) and opens in the drawing app. */
   const drawInstead = async () => {
     const ok = await confirm({
       title: `Draw ${glyph.char || glyph.name} yourself?`,
       body: (
         <p>
-          Its current shape is written to an SVG in every weight and opened in Illustrator. From then on it's a drawing
+          Its current shape is written to an SVG in every weight and opened in {editorLabel}. From then on it's a drawing
           like any other letter, and no longer follows changes to its parts.
         </p>
       ),
@@ -156,7 +159,29 @@ export function GlyphEditor({
     drag.current = { index, moved: false, mode, start: toFont(e), origin: anchors[index] }
     setActive(index)
   }
+  // Dragging an edge of the advance box moves that edge of the SVG artboard.
+  const edgeDrag = useRef<{ side: 'left' | 'right'; start: number } | null>(null)
+  const [edgeDelta, setEdgeDelta] = useState<{ side: 'left' | 'right'; d: number } | null>(null)
+  const onEdgeDown = (side: 'left' | 'right') => (e: React.PointerEvent) => {
+    e.stopPropagation()
+    ;(e.target as Element).setPointerCapture(e.pointerId)
+    edgeDrag.current = { side, start: toFont(e).x }
+    setEdgeDelta({ side, d: 0 })
+  }
+  const setMetrics = async (values: { lsb?: number; rsb?: number; width?: number }) => {
+    try {
+      await api.setMetrics(glyph.name, values)
+      onChanged()
+    } catch (e) {
+      onError(String(e))
+    }
+  }
+
   const onPointerMove = (e: React.PointerEvent) => {
+    if (edgeDrag.current) {
+      setEdgeDelta({ side: edgeDrag.current.side, d: toFont(e).x - edgeDrag.current.start })
+      return
+    }
     const d = drag.current
     if (!d) return
     const p = toFont(e)
@@ -174,6 +199,16 @@ export function GlyphEditor({
     setAnchors((prev) => prev.map((a, j) => (j === d.index ? { ...a, ...moved } : a)))
   }
   const onPointerUp = () => {
+    if (edgeDrag.current) {
+      const d = edgeDelta?.d ?? 0
+      edgeDrag.current = null
+      setEdgeDelta(null)
+      if (d === 0) return
+      // the left edge moving right by d shrinks the left side bearing by d
+      if (edgeDelta?.side === 'left') void setMetrics({ lsb: Math.round((glyph.bounds?.[0] ?? 0) - d) })
+      else void setMetrics({ width: Math.round(glyph.width + d) })
+      return
+    }
     if (drag.current?.moved) void commit(anchors)
     drag.current = null
   }
@@ -382,8 +417,23 @@ export function GlyphEditor({
               <line key={m.label} className={`metric ${m.label === 'baseline' ? 'baseline' : ''}${m.guide ? ' guide' : ''}`}
                 x1={x0} x2={x1} y1={m.y} y2={m.y} />
             ))}
-            <rect className="advance" x={0} y={info.descender} width={frame.width}
+            <rect className="advance" x={edgeDelta?.side === 'left' ? edgeDelta.d : 0} y={info.descender}
+              width={Math.max(0, frame.width + (edgeDelta ? (edgeDelta.side === 'left' ? -edgeDelta.d : edgeDelta.d) : 0))}
               height={info.ascender - info.descender} />
+            {!attach && !composite && glyph.category !== 'mark' && (
+              <>
+                {glyph.source && !glyph.sourceMissing && (
+                  <rect className="edge-handle" x={(edgeDelta?.side === 'left' ? edgeDelta.d : 0) - 12} y={info.descender}
+                    width={24} height={info.ascender - info.descender} onPointerDown={onEdgeDown('left')}>
+                    <title>Drag to change the left side bearing (moves the artboard's left edge)</title>
+                  </rect>
+                )}
+                <rect className="edge-handle" x={frame.width + (edgeDelta?.side === 'right' ? edgeDelta.d : 0) - 12}
+                  y={info.descender} width={24} height={info.ascender - info.descender} onPointerDown={onEdgeDown('right')}>
+                  <title>Drag to change the width (moves the artboard's right edge)</title>
+                </rect>
+              </>
+            )}
             {ghosts.map((g) => (
               <path key={g.key} className="ghost" d={g.glyph.path} transform={`translate(${g.dx},${g.dy})`} />
             ))}
@@ -413,6 +463,29 @@ export function GlyphEditor({
             <text key={m.label} className={`metric-label${m.guide ? ' guide' : ''}`} x={x0 + 12} y={-m.y - 10}>{m.label}</text>
           ))}
           {showPoints && points && <PointLabels contours={points.contours} offset={viewOffset} />}
+          {edgeDelta && (() => {
+            // Live readout while dragging an edge: the side bearing it sets, and the width.
+            const d = Math.round(edgeDelta.d)
+            const left = edgeDelta.side === 'left'
+            const ink = glyph.bounds
+            const width = glyph.width + (left ? -d : d)
+            const bearing = ink ? (left ? Math.round(ink[0] - d) : Math.round(width - ink[2])) : null
+            const text = `${bearing !== null ? `${left ? 'LSB' : 'RSB'} ${bearing} · ` : ''}width ${width}`
+            const x = left ? d : glyph.width + d
+            // A fixed size on screen, whatever the zoom: font units per screen pixel.
+            const upp = 1 / (groupRef.current?.getScreenCTM()?.a || 1)
+            const fontSize = 12 * upp
+            const boxWidth = (text.length * 7 + 14) * upp
+            const boxHeight = 20 * upp
+            const gap = 8 * upp
+            return (
+              <g className="drag-readout"
+                transform={`translate(${left ? x - boxWidth - gap : x + gap},${-info.ascender - boxHeight - gap})`}>
+                <rect width={boxWidth} height={boxHeight} rx={3 * upp} />
+                <text x={7 * upp} y={14 * upp} fontSize={fontSize}>{text}</text>
+              </g>
+            )
+          })()}
           {anchors.map((a, i) => (
             <text key={i} className={`anchor-label${a.name.startsWith('_') ? ' mark-anchor' : ''}`}
               x={shown(a).x + 26} y={-shown(a).y - 26}>{a.name}</text>
@@ -452,7 +525,7 @@ export function GlyphEditor({
               , placed by their anchors. It's rebuilt whenever you change a part or move an anchor.
             </p>
             <div className="row">
-              <button onClick={() => void drawInstead()} title="Write it out as an SVG to draw in Illustrator">
+              <button onClick={() => void drawInstead()} title={`Write it out as an SVG to draw in ${editorLabel}`}>
                 Draw it instead
               </button>
             </div>
@@ -462,7 +535,7 @@ export function GlyphEditor({
         {!composite && <>
         <div className="row">
           <button className="primary" onClick={() => void editInIllustrator()} title="Ctrl+E">
-            Edit in Illustrator
+            {editIn}
           </button>
           <button disabled={!glyph.source || glyph.sourceMissing}
             onClick={() => api.revealGlyph(glyph.name).catch((e) => onError(String(e)))}
@@ -493,7 +566,7 @@ export function GlyphEditor({
         )}
         {glyph.sourceMissing && (
           <p className="warnings">
-            {glyph.source} was deleted or moved. The outline is kept; Edit in Illustrator writes a new SVG from it.
+            {glyph.source} was deleted or moved. The outline is kept; {editIn} writes a new SVG from it.
           </p>
         )}
         </>}
@@ -503,7 +576,7 @@ export function GlyphEditor({
         )}
 
         {!composite && <>
-        <WidthField glyph={glyph} onChanged={onChanged} onError={onError} />
+        <MetricsField glyph={glyph} onSet={(v) => void setMetrics(v)} onChanged={onChanged} onError={onError} />
 
         <div className="row">
           <h4 className="grow">Point order</h4>
@@ -611,29 +684,58 @@ export function GlyphEditor({
   )
 }
 
-function WidthField({ glyph, onChanged, onError }: Omit<Props, 'project'>) {
-  const set = async (width: number | null) => {
+/**
+ * Left side bearing, width and right side bearing. With an SVG, changing them
+ * moves the edges of its artboard (so Illustrator shows the same thing);
+ * without one, only the width can be set.
+ */
+function MetricsField({ glyph, onSet, onChanged, onError }: {
+  glyph: Glyph
+  onSet: (values: { lsb?: number; rsb?: number; width?: number }) => void
+  onChanged: () => void
+  onError: (msg: string) => void
+}) {
+  const hasArtboard = !!glyph.source && !glyph.sourceMissing
+  const ink = glyph.bounds && glyph.category !== 'mark' ? glyph.bounds : null
+  const lsb = ink ? Math.round(ink[0]) : null
+  const rsb = ink ? Math.round(glyph.width - ink[2]) : null
+  const resetWidth = async () => {
     try {
-      await api.setWidth(glyph.name, width)
+      await api.setWidth(glyph.name, null)
       onChanged()
     } catch (e) {
       onError(String(e))
     }
   }
   return (
-    <div className="row width-row">
-      <label>Advance width</label>
-      <CommitInput value={String(glyph.width)} numeric onCommit={(v) => void set(Number(v))} />
-      {glyph.widthOverride && glyph.source && (
-        <button className="link" onClick={() => void set(null)} title="Use the Illustrator artboard width again">
-          reset to artboard
+    <div className="metrics-field">
+      <div className="metrics-row">
+        <label title="Left side bearing: space between the left edge and the drawing">
+          <span>LSB</span>
+          {lsb !== null && hasArtboard
+            ? <CommitInput value={String(lsb)} numeric onCommit={(v) => onSet({ lsb: Math.round(Number(v)) })} />
+            : <span className="muted">{lsb ?? '–'}</span>}
+        </label>
+        <label title="Advance width">
+          <span>Width</span>
+          <CommitInput value={String(glyph.width)} numeric onCommit={(v) => onSet({ width: Math.round(Number(v)) })} />
+        </label>
+        <label title="Right side bearing: space between the drawing and the right edge">
+          <span>RSB</span>
+          {rsb !== null && hasArtboard
+            ? <CommitInput value={String(rsb)} numeric onCommit={(v) => onSet({ rsb: Math.round(Number(v)) })} />
+            : <span className="muted">{rsb ?? '–'}</span>}
+        </label>
+      </div>
+      {glyph.widthOverride && hasArtboard && (
+        <button className="link" onClick={() => void resetWidth()} title="Use the SVG artboard width again">
+          width was set without the artboard: reset to artboard
         </button>
       )}
     </div>
   )
 }
 
-/** Text input that only reports on Enter or blur, so typing doesn't spam the server. */
 /** Contour list, the default weight for comparison, and the fixes. */
 function PointOrderSection({ glyph, points, weight, compat, onEdit, onMatch }: {
   glyph: Glyph
@@ -698,12 +800,13 @@ function PointOrderSection({ glyph, points, weight, compat, onEdit, onMatch }: {
       </div>
       <p className="hint">
         Click a point on the canvas to start its contour there. #n marks where contour n starts; the arrow shows
-        its direction. Fixes are kept and reapplied when the SVG is edited in Illustrator.
+        its direction. Fixes are kept and reapplied when the SVG is edited again.
       </p>
     </div>
   )
 }
 
+/** Text input that only reports on Enter or blur, so typing doesn't spam the server. */
 export function CommitInput({ value, onCommit, numeric, placeholder }: {
   value: string
   onCommit: (v: string) => void

@@ -108,6 +108,31 @@ class PointOrderRequest(BaseModel):
     value: int = 0
 
 
+class BulkMetricsRequest(BaseModel):
+    glyphs: list[str]
+    lsb: float | None = None
+    rsb: float | None = None
+    allMasters: bool = False
+
+
+class BulkAnchorsRequest(BaseModel):
+    anchor: str
+    glyphs: list[str] | None = None  # None: every glyph with the anchor
+    x: float | str | None = None  # a number, "center", or None to keep
+    y: float | None = None
+    allMasters: bool = False
+
+
+class EditorRequest(BaseModel):
+    choice: str  # auto, illustrator, inkscape or default
+
+
+class MetricsRequest(BaseModel):
+    lsb: float | None = None
+    rsb: float | None = None
+    width: float | None = None
+
+
 class CompositesRequest(BaseModel):
     unicodes: list[int]
 
@@ -301,14 +326,14 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
 
     @app.post("/api/glyphs/{name}/edit")
     def edit_glyph(name: str):
-        """Open the glyph's SVG in Illustrator; saving there re-imports it."""
+        """Open the glyph's SVG in the drawing app; saving there re-imports it."""
         project = state.require()
         created = not guard(project.has_source, name)
         path = guard(project.source_svg, name)
         try:
-            app_name = illustrator.open_in_illustrator(path)
+            app_name = illustrator.open_svg(path)
         except OSError as exc:
-            raise HTTPException(500, f"Couldn't start Illustrator: {exc}")
+            raise HTTPException(500, f"Couldn't start the drawing app: {exc}")
         return {"path": str(path), "app": app_name, "created": created, "project": project.summary()}
 
     @app.post("/api/glyphs/{name}/delete")
@@ -363,10 +388,10 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
 
     @app.post("/api/glyphs/{name}/draw-instead")
     def draw_instead(name: str):
-        """A built accented letter becomes an SVG to draw, then opens in Illustrator."""
+        """A built accented letter becomes an SVG to draw, then opens in the drawing app."""
         project = state.require()
         path = guard(project.draw_instead, name)
-        app_name = illustrator.open_in_illustrator(path)
+        app_name = illustrator.open_svg(path)
         return {"path": str(path), "app": app_name, "project": project.summary()}
 
     @app.post("/api/glyphs/{name}/duplicate")
@@ -388,6 +413,26 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
         found = illustrator.find_illustrator()
         return {"name": found.name if found else None}
 
+    def editors_info():
+        chosen = illustrator.preferences().get("editor", "auto")
+        active = illustrator.resolve()
+        have = illustrator.installed()
+        return {"choice": chosen, "installed": have, "active": active,
+                "label": "Illustrator" if active == "illustrator" else "Inkscape" if active == "inkscape" else "default app"}
+
+    @app.get("/api/editors")
+    def get_editors():
+        """The drawing apps installed, the user's choice and the one that will open."""
+        return editors_info()
+
+    @app.put("/api/editors")
+    def put_editors(req: EditorRequest):
+        try:
+            illustrator.set_editor(req.choice)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return editors_info()
+
     @app.get("/api/glyphs/{name}")
     def get_glyph(name: str):
         return guard(state.require().glyph_detail, name)
@@ -397,6 +442,24 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
         project = state.require()
         guard(project.set_anchors, name, [a.model_dump() for a in req.anchors])
         return project.glyph_detail(name)
+
+    @app.put("/api/glyphs/{name}/metrics")
+    def put_metrics(name: str, req: MetricsRequest):
+        """Side bearings / width, by moving the SVG artboard's edges."""
+        project = state.require()
+        return guard(project.set_metrics, name, req.lsb, req.rsb, req.width)
+
+    @app.post("/api/bulk/metrics")
+    def bulk_metrics(req: BulkMetricsRequest):
+        project = state.require()
+        result = guard(project.bulk_metrics, req.glyphs, req.lsb, req.rsb, req.allMasters)
+        return {**result, "project": project.summary()}
+
+    @app.post("/api/bulk/anchors")
+    def bulk_anchors(req: BulkAnchorsRequest):
+        project = state.require()
+        result = guard(project.bulk_anchors, req.anchor, req.glyphs, req.x, req.y, req.allMasters)
+        return {**result, "project": project.summary()}
 
     @app.put("/api/glyphs/{name}/width")
     def put_width(name: str, req: WidthRequest):
