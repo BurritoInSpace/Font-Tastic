@@ -5,6 +5,7 @@ import { describeLocation } from './axes'
 import { GlyphEditor } from './components/GlyphEditor'
 import { GlyphGrid } from './components/GlyphGrid'
 import { HomeScreen } from './components/HomeScreen'
+import { AccentsDialog } from './components/AccentsDialog'
 import { ExportDialog } from './components/ExportDialog'
 import { ImportDialog, type Upload } from './components/ImportDialog'
 import { InfoPanel } from './components/InfoPanel'
@@ -36,6 +37,8 @@ export default function App() {
   const [compat, setCompat] = useState<CompatReport | null>(null)
   const [exporting, setExporting] = useState(false)
   const [showPoints, setShowPoints] = useState(false)
+  const [accenting, setAccenting] = useState(false)
+  const [compare, setCompare] = useState('')
   const revision = useRef<number | null>(null)
   revision.current = project?.revision ?? null
 
@@ -229,13 +232,15 @@ export default function App() {
 
       <main className="workspace">
         <GlyphGrid glyphs={project.glyphs} info={project.info} selected={selected} compat={compat}
-          onSelect={(n) => { setSelected(n); setTab('glyph') }} onImport={(files) => void importFiles(files)} />
+          onSelect={(n) => { setSelected(n); setTab('glyph') }} onImport={(files) => void importFiles(files)}
+          onAccents={project.scripts.some((s) => s.direction === 'ltr') ? () => setAccenting(true) : undefined} />
         <div className="center">
           {tab === 'glyph' &&
             (glyph ? (
               <GlyphEditor project={project} glyph={glyph} onChanged={refresh} onError={onError}
                 onMessage={(text) => setMessage({ text })} onOpenGlyph={setSelected} onProject={setProject}
-                showPoints={showPoints} onShowPoints={setShowPoints} compat={compat} />
+                showPoints={showPoints} onShowPoints={setShowPoints} compat={compat}
+                compare={compare} onCompare={setCompare} />
             ) : (
               <div className="empty">Pick a glyph on the left to place its anchors.</div>
             ))}
@@ -283,6 +288,21 @@ export default function App() {
       {exporting && (
         <ExportDialog project={project} compat={compat} onCancel={() => setExporting(false)} onDone={exported}
           onError={(m) => { setExporting(false); onError(m) }} />
+      )}
+
+      {accenting && (
+        <AccentsDialog onCancel={() => setAccenting(false)}
+          onDone={(next, added, errors) => {
+            setAccenting(false)
+            setProject(next)
+            const failed = Object.entries(errors)
+            if (failed.length) onError(`Built ${added.length}; not built: ${failed.map(([c, e]) => `${c} (${e})`).join('; ')}`)
+            else setMessage({ text: `Built ${added.length} accented letter${added.length === 1 ? '' : 's'}` })
+            if (added.length) {
+              setSelected(added[0])
+              setTab('glyph')
+            }
+          }} />
       )}
 
       {uploads && (

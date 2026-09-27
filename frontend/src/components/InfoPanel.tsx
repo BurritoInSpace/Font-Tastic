@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { api, type FontInfo, type Project, type Snapshot } from '../api'
+import { api, type FontInfo, type Guide, type Project, type Snapshot } from '../api'
 import { describeLocation } from '../axes'
 import { useConfirm } from './Confirm'
+import { CommitInput } from './GlyphEditor'
 
 const FIELDS: { key: keyof FontInfo; label: string; numeric?: boolean }[] = [
   { key: 'familyName', label: 'Family name' },
@@ -71,6 +72,23 @@ export function InfoPanel({ project, onChanged, onRestored, onError, onDeleteWei
         <button className="primary" disabled={!dirty} onClick={() => void save()}>Save</button>
       </div>
 
+      <h4>Guides</h4>
+      <p className="muted small">
+        Extra lines in the glyph editor, for heights the standard metrics don't cover: where Hebrew letters top out
+        next to Latin capitals and x-height, a figure height, an accent line. Shared by every master.
+      </p>
+      <GuidesEditor project={project} onChanged={() => onChanged(false)} onError={onError} />
+
+      <h4>Scripts</h4>
+      <p className="muted small">
+        {project.scripts.length
+          ? <>This font has {project.scripts.map((s) => s.name).join(' and ')} letters.</>
+          : <>No letters yet.</>}
+        {' '}OpenType language systems (from the letters present):{' '}
+        <code>{project.languageSystems.map(([s]) => s).join(', ')}</code>. Digits, punctuation and the space are shared
+        by every script.
+      </p>
+
       <h4>Masters</h4>
       <p className="muted small">
         Each master (a weight, width...) has its own SVGs, anchors, widths and kerning. The glyph set, kerning groups,
@@ -102,6 +120,44 @@ export function InfoPanel({ project, onChanged, onRestored, onError, onDeleteWei
 
       <Snapshots project={project} onRestored={onRestored} onError={onError} />
     </div>
+  )
+}
+
+function GuidesEditor({ project, onChanged, onError }: { project: Project; onChanged: () => void; onError: (m: string) => void }) {
+  const guides = project.settings.guides ?? []
+  const save = async (next: Guide[]) => {
+    try {
+      await api.saveSettings({ guides: next })
+      onChanged()
+    } catch (e) {
+      onError(String(e))
+    }
+  }
+  const { xHeight, capHeight } = project.info
+  return (
+    <>
+      {guides.length > 0 && (
+        <table className="rules guides-table">
+          <tbody>
+            {guides.map((g, i) => (
+              <tr key={i}>
+                <td><CommitInput value={g.name} onCommit={(v) => v.trim() && void save(guides.map((x, j) => (j === i ? { ...x, name: v.trim() } : x)))} /></td>
+                <td className="num-cell"><CommitInput value={String(g.y)} numeric
+                  onCommit={(v) => void save(guides.map((x, j) => (j === i ? { ...x, y: Math.round(Number(v)) } : x)))} /></td>
+                <td><button className="icon" title="Remove guide" onClick={() => void save(guides.filter((_, j) => j !== i))}>×</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="row">
+        <button onClick={() => void save([...guides, guides.some((g) => g.name === 'Hebrew height')
+          ? { name: `Guide ${guides.length + 1}`, y: Math.round(xHeight / 2) }
+          : { name: 'Hebrew height', y: Math.round((xHeight + capHeight) / 2) }])}>
+          + Add guide
+        </button>
+      </div>
+    </>
   )
 }
 

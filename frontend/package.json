@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "bidi-js": "^1.1.0",
     "harfbuzzjs": "^1.6.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

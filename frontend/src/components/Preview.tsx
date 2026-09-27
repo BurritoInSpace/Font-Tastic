@@ -114,7 +114,7 @@ export function Preview({ project, onSelectGlyph }: Props) {
             {lines.map((run, li) => (
               <svg
                 key={li}
-                className="line"
+                className={`line${run.rtl ? '' : ' ltr'}`}
                 width={((run.width + 40) * size) / unitsPerEm}
                 height={(lineHeight * size) / unitsPerEm}
                 viewBox={`-20 ${-ascender} ${run.width + 40} ${lineHeight}`}
@@ -136,7 +136,7 @@ export function Preview({ project, onSelectGlyph }: Props) {
       </div>
 
       <div className="preview-bar light">
-        <textarea dir="rtl" value={text} onChange={(e) => setText(e.target.value)} spellCheck={false}
+        <textarea dir="auto" value={text} onChange={(e) => setText(e.target.value)} spellCheck={false}
           aria-label="Preview text" />
         <div className="preview-options">
           <input type="range" min={24} max={260} value={size} onChange={(e) => setSize(Number(e.target.value))}

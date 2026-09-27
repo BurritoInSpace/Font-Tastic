@@ -147,11 +147,12 @@ def parse_svg(data: bytes, ascender: float, descender: float) -> ImportedOutline
     return ImportedOutline(contours, vb_w * scale, _dedupe(warnings))
 
 
-def outline_to_svg(glyph, width: float, ascender: float, descender: float) -> str:
+def outline_to_svg(glyph, width: float, ascender: float, descender: float, glyph_set=None) -> str:
     """The inverse of ``parse_svg``: a glyph's outline on an artboard that maps
-    back onto the same em box (1 font unit = 1 pt in Illustrator)."""
+    back onto the same em box (1 font unit = 1 pt in Illustrator). Components
+    are drawn out through ``glyph_set``."""
     height = ascender - descender
-    pen = SVGPathPen(None, ntos=lambda v: f"{v:.2f}".rstrip("0").rstrip("."))
+    pen = SVGPathPen(glyph_set, ntos=lambda v: f"{v:.2f}".rstrip("0").rstrip("."))
     glyph.draw(TransformPen(pen, Transform(1, 0, 0, -1, 0, ascender)))
     d = pen.getCommands()
     shape = f'\n  <path d="{d}"/>' if d else ""

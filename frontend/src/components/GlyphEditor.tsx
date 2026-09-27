@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, readBase64, type Anchor, type CompatReport, type Glyph, type PointOrder, type Project } from '../api'
-import { basesFor, glyphLabel, marksFor, STANDARD_ANCHORS } from '../glyphs'
+import { basesFor, charsToGlyphs, glyphLabel, marksFor, standardAnchors } from '../glyphs'
 import { ALTERNATE_FEATURES, nextAlternateName } from '../importPlan'
 import { useConfirm } from './Confirm'
 import { CONTOUR_COLOURS, PointLabels, PointMarks, ReferenceView } from './PointOrder'
@@ -20,12 +20,16 @@ interface Props {
   showPoints?: boolean
   onShowPoints?: (show: boolean) => void
   compat?: CompatReport | null
+  /** letters shown faintly beside the glyph, to compare heights and weight across scripts */
+  compare?: string
+  onCompare?: (text: string) => void
 }
 
 const PAD = 160
 
 export function GlyphEditor({
   project, glyph, onChanged, onError, onMessage, onOpenGlyph, onProject, showPoints = false, onShowPoints, compat,
+  compare = '', onCompare,
 }: Props) {
   const [reassigning, setReassigning] = useState(false)
   const confirm = useConfirm()
@@ -98,7 +102,36 @@ export function GlyphEditor({
     }
   }
 
+  const byName = new Map(project.glyphs.map((g) => [g.name, g]))
+  const composite = glyph.composite
+
+  /** A built accented letter becomes an SVG (in every weight) and opens in Illustrator. */
+  const drawInstead = async () => {
+    const ok = await confirm({
+      title: `Draw ${glyph.char || glyph.name} yourself?`,
+      body: (
+        <p>
+          Its current shape is written to an SVG in every weight and opened in Illustrator. From then on it's a drawing
+          like any other letter, and no longer follows changes to its parts.
+        </p>
+      ),
+      confirmLabel: 'Draw it instead',
+    })
+    if (!ok) return
+    try {
+      const res = await api.drawInstead(glyph.name)
+      onProject?.(res.project)
+      onMessage?.(`Wrote ${glyph.name}.svg and opened it in ${res.app}. Save there and it updates here.`)
+    } catch (e) {
+      onError(String(e))
+    }
+  }
+
   const editInIllustrator = async () => {
+    if (composite) {
+      void drawInstead()
+      return
+    }
     try {
       const res = await api.editGlyph(glyph.name)
       onMessage?.(
@@ -187,8 +220,8 @@ export function GlyphEditor({
   let attach: { index: number; base: Glyph; offset: { x: number; y: number } } | null = null
   for (const [i, a] of anchors.entries()) {
     const options = isMark
-      ? a.name.startsWith('_') ? basesFor(project, a.name) : []
-      : a.name.startsWith('_') ? [] : marksFor(project, a.name)
+      ? a.name.startsWith('_') ? basesFor(project, a.name, glyph) : []
+      : a.name.startsWith('_') ? [] : marksFor(project, a.name, glyph)
     if (options.length === 0) continue
     const chosen = options.find((g) => g.name === ghostChoice[a.name]) ?? options[0]
     companions.push({ anchor: a.name, options, chosen })
@@ -209,8 +242,28 @@ export function GlyphEditor({
   // anchors, so the view holds still while dragging.
   const frame = attach ? attach.base : glyph
   const [fx0, fy0, fx1, fy1] = frame.bounds ?? [0, 0, frame.width, 0]
+
+  // Letters to compare with, set after the glyph at their own advances (not in the mark-on-letter view).
+  const byGlyphName = new Map(project.glyphs.map((g) => [g.name, g]))
+  const compared: { glyph: Glyph; x: number }[] = []
+  if (!attach && compare.trim()) {
+    let x = frame.width
+    for (const ch of compare) {
+      if (ch === ' ') {
+        x += byGlyphName.get('space')?.width ?? 250
+        continue
+      }
+      const g = byGlyphName.get(charsToGlyphs(project, ch)?.[0] ?? '')
+      if (g) {
+        compared.push({ glyph: g, x })
+        x += g.width
+      }
+    }
+  }
+  const comparedEnd = compared.length ? compared[compared.length - 1].x + compared[compared.length - 1].glyph.width : 0
+
   const x0 = Math.min(0, fx0, attach ? 0 : bx0) - PAD
-  const x1 = Math.max(frame.width, fx1, attach ? 0 : bx1, x0 + PAD + 200) + PAD
+  const x1 = Math.max(frame.width, fx1, attach ? 0 : bx1, x0 + PAD + 200, comparedEnd) + PAD
   const yTop = Math.max(info.ascender, fy1, attach ? 0 : by1) + PAD
   const yBottom = Math.min(info.descender, fy0, attach ? 0 : by0) - PAD
 
@@ -220,7 +273,8 @@ export function GlyphEditor({
     { y: info.xHeight, label: 'x-height' },
     { y: 0, label: 'baseline' },
     { y: info.descender, label: 'descender' },
-  ]
+    ...(project.settings.guides ?? []).map((g) => ({ y: g.y, label: g.name, guide: true })),
+  ] as { y: number; label: string; guide?: boolean }[]
 
   const addAnchor = (name: string) => {
     if (!name || anchors.some((a) => a.name === name)) return
@@ -234,7 +288,7 @@ export function GlyphEditor({
   // A mark attaches through exactly one anchor (_top, _bottom, ...); offer the
   // choice only while it has none. Stacking anchors (…mkmk) go in "custom".
   const attached = anchors.some((a) => a.name.startsWith('_') && !a.name.endsWith('mkmk'))
-  const suggestions = isMark && attached ? [] : STANDARD_ANCHORS.map((n) => (isMark ? `_${n}` : n)).filter(
+  const suggestions = isMark && attached ? [] : standardAnchors(glyph.script).map((n) => (isMark ? `_${n}` : n)).filter(
     (n) => !anchors.some((a) => a.name === n),
   )
 
@@ -325,7 +379,7 @@ export function GlyphEditor({
         >
           <g ref={groupRef} transform="scale(1,-1)">
             {metricLines.map((m) => (
-              <line key={m.label} className={`metric ${m.label === 'baseline' ? 'baseline' : ''}`}
+              <line key={m.label} className={`metric ${m.label === 'baseline' ? 'baseline' : ''}${m.guide ? ' guide' : ''}`}
                 x1={x0} x2={x1} y1={m.y} y2={m.y} />
             ))}
             <rect className="advance" x={0} y={info.descender} width={frame.width}
@@ -334,6 +388,9 @@ export function GlyphEditor({
               <path key={g.key} className="ghost" d={g.glyph.path} transform={`translate(${g.dx},${g.dy})`} />
             ))}
             {attach && <path className="ghost base-ghost" d={attach.base.path} />}
+            {compared.map((c, i) => (
+              <path key={i} className="ghost compare-ghost" d={c.glyph.path} transform={`translate(${c.x},0)`} />
+            ))}
             <path className={`outline${attach ? ' draggable' : ''}`} d={glyph.path}
               transform={`translate(${viewOffset.x},${viewOffset.y})`}
               onPointerDown={attach ? onPointerDown(attach.index, 'mark') : undefined} />
@@ -353,7 +410,7 @@ export function GlyphEditor({
             ))}
           </g>
           {metricLines.map((m) => (
-            <text key={m.label} className="metric-label" x={x0 + 12} y={-m.y - 10}>{m.label}</text>
+            <text key={m.label} className={`metric-label${m.guide ? ' guide' : ''}`} x={x0 + 12} y={-m.y - 10}>{m.label}</text>
           ))}
           {showPoints && points && <PointLabels contours={points.contours} offset={viewOffset} />}
           {anchors.map((a, i) => (
@@ -375,6 +432,34 @@ export function GlyphEditor({
           </div>
         </header>
 
+        <div className="row compare-row">
+          <label className="muted small" htmlFor="compare">Compare with</label>
+          <input id="compare" dir="auto" className="grow" value={compare} placeholder="e.g. Hn or אב"
+            title="Letters shown beside this one, to match heights and stroke weight across scripts"
+            onChange={(e) => onCompare?.(e.target.value)} />
+        </div>
+
+        {composite && (
+          <div className="composite-info">
+            <p>
+              Built from{' '}
+              {[composite.base, ...composite.marks].map((n, i) => (
+                <span key={n}>
+                  {i > 0 && ' + '}
+                  <button className="link" onClick={() => onOpenGlyph?.(n)}>{byName.get(n)?.char || n}</button>
+                </span>
+              ))}
+              , placed by their anchors. It's rebuilt whenever you change a part or move an anchor.
+            </p>
+            <div className="row">
+              <button onClick={() => void drawInstead()} title="Write it out as an SVG to draw in Illustrator">
+                Draw it instead
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!composite && <>
         <div className="row">
           <button className="primary" onClick={() => void editInIllustrator()} title="Ctrl+E">
             Edit in Illustrator
@@ -411,11 +496,13 @@ export function GlyphEditor({
             {glyph.source} was deleted or moved. The outline is kept; Edit in Illustrator writes a new SVG from it.
           </p>
         )}
+        </>}
 
         {glyph.warnings.length > 0 && (
           <ul className="warnings">{glyph.warnings.map((w) => <li key={w}>{w}</li>)}</ul>
         )}
 
+        {!composite && <>
         <WidthField glyph={glyph} onChanged={onChanged} onError={onError} />
 
         <div className="row">
@@ -464,12 +551,15 @@ export function GlyphEditor({
             ? `Drag the mark onto ${attach.base.char || attach.base.name} to place it (Shift: straight line) · arrow keys nudge the mark (Shift ×10)`
             : 'Drag anchors on the canvas (Shift: straight line) · arrow keys nudge (Shift ×10) · Delete removes'}
         </p>
+        </>}
 
         {!glyph.auto && glyph.name !== '.notdef' && (
           <div className="row glyph-actions">
-            <button onClick={() => setReassigning(true)} title="It was named or imported as the wrong character">
-              Reassign…
-            </button>
+            {!composite && (
+              <button onClick={() => setReassigning(true)} title="It was named or imported as the wrong character">
+                Reassign…
+              </button>
+            )}
             <button className="danger" onClick={() => void deleteGlyph()}>Delete glyph</button>
           </div>
         )}

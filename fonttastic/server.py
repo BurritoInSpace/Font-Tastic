@@ -108,6 +108,10 @@ class PointOrderRequest(BaseModel):
     value: int = 0
 
 
+class CompositesRequest(BaseModel):
+    unicodes: list[int]
+
+
 class NewWeightRequest(BaseModel):
     name: str
     weight: int | None = None
@@ -345,6 +349,25 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
         project = state.require()
         result = guard(project.match_all_to_default)
         return {**result, "compat": project.compatibility(), "project": project.summary()}
+
+    @app.get("/api/composites")
+    def composite_candidates():
+        """Accented letters that could be built from the base letters and marks the font has."""
+        return {"candidates": state.require().composite_candidates()}
+
+    @app.post("/api/composites")
+    def add_composites(req: CompositesRequest):
+        project = state.require()
+        result = guard(project.add_composites, req.unicodes)
+        return {**result, "project": project.summary()}
+
+    @app.post("/api/glyphs/{name}/draw-instead")
+    def draw_instead(name: str):
+        """A built accented letter becomes an SVG to draw, then opens in Illustrator."""
+        project = state.require()
+        path = guard(project.draw_instead, name)
+        app_name = illustrator.open_in_illustrator(path)
+        return {"path": str(path), "app": app_name, "project": project.summary()}
 
     @app.post("/api/glyphs/{name}/duplicate")
     def duplicate_glyph(name: str, req: DuplicateRequest):

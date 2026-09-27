@@ -141,7 +141,7 @@ function ImportRow({ project, upload, decision: d, planned, onChange }: {
                 )}
                 {d.identity === 'ligature' && (
                   <div className="row">
-                    <input dir="rtl" className="char-input" value={d.letters} placeholder="אל"
+                    <input dir="auto" className="char-input" value={d.letters} placeholder="אל"
                       onChange={(e) => onChange({ letters: e.target.value })} />
                     <FeatureSelect options={LIGATURE_FEATURES} value={d.ligFeature} onChange={(ligFeature) => onChange({ ligFeature })} />
                   </div>

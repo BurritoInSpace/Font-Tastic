@@ -116,7 +116,7 @@ export function ReassignDialog({ project, glyph, onCancel, onDone }: Props) {
           )}
           {identity === 'ligature' && (
             <div className="row">
-              <input dir="rtl" className="char-input" value={letters} placeholder="אל" onChange={(e) => setLetters(e.target.value)} />
+              <input dir="auto" className="char-input" value={letters} placeholder="אל" onChange={(e) => setLetters(e.target.value)} />
               <select value={ligFeature} onChange={(e) => setLigFeature(e.target.value)}>
                 {LIGATURE_FEATURES.map((f) => <option key={f}>{f}</option>)}
               </select>

@@ -58,7 +58,7 @@ export function LigaturesPanel({ project, onChanged, onError }: Props) {
           {rules.map((r, i) => (
             <tr key={i}>
               <td>
-                <span className="seq" dir="rtl">{r.components.map((c) => byName.get(c)?.char ?? '?').join('')}</span>
+                <span className="seq" dir="auto">{r.components.map((c) => byName.get(c)?.char ?? '?').join('')}</span>
                 <span className="muted small"> {r.components.join(' ')}</span>
               </td>
               <td>→</td>
@@ -78,7 +78,7 @@ export function LigaturesPanel({ project, onChanged, onError }: Props) {
         </tbody>
       </table>
       <div className="row">
-        <input dir="rtl" value={input} placeholder="type the input letters, e.g. אל" onChange={(e) => setInput(e.target.value)}
+        <input dir="auto" value={input} placeholder="type the input letters, e.g. אל" onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && add()} />
         <button onClick={add}>Add rule</button>
         <span className="spacer" />

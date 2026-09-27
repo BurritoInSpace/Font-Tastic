@@ -359,7 +359,8 @@ function VariablePreview({ project, setup }: { project: Project; setup: Variable
       <h2>Interpolation preview</h2>
       <div className="variable-preview">
         {error ? <div className="compile-error">{error}</div> : run && (
-          <svg viewBox={`-20 ${-ascender} ${run.width + 40} ${lineHeight}`} preserveAspectRatio="xMaxYMid meet">
+          <svg viewBox={`-20 ${-ascender} ${run.width + 40} ${lineHeight}`}
+            preserveAspectRatio={run.rtl ? 'xMaxYMid meet' : 'xMinYMid meet'}>
             {run.glyphs.map((g, i) => (
               <path key={i} d={g.path} transform={`translate(${g.x},${-g.y}) scale(1,-1)`} />
             ))}
@@ -386,7 +387,7 @@ function VariablePreview({ project, setup }: { project: Project; setup: Variable
           )
         })}
         <span className="spacer" />
-        <input dir="rtl" value={text} onChange={(e) => setText(e.target.value)} aria-label="Preview text" />
+        <input dir="auto" value={text} onChange={(e) => setText(e.target.value)} aria-label="Preview text" />
       </div>
       <p className="hint">Glyphs that don't match across masters yet are shown at the default master.</p>
     </div>

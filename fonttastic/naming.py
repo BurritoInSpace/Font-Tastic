@@ -151,6 +151,6 @@ def display_char(name: str) -> str:
     cp = unicode_of_base(name)
     if cp is None:
         return ""
-    if cp in hebrew.NIQQUD:
+    if cp in hebrew.NIQQUD or unicodedata.category(chr(cp)) == "Mn":
         return "◌" + chr(cp)  # dotted circle carrier so marks are visible
     return chr(cp)

@@ -1,8 +1,6 @@
 import { useRef, useState } from 'react'
 import type { CompatReport, FontInfo, Glyph } from '../api'
-import { glyphLabel, sectionOf, type Section } from '../glyphs'
-
-const ORDER: Section[] = ['Letters', 'Marks', 'Alternates & ligatures', 'Other']
+import { glyphLabel, sectionOf, sectionRank } from '../glyphs'
 
 interface Props {
   glyphs: Glyph[]
@@ -10,16 +8,18 @@ interface Props {
   selected: string | null
   onSelect: (name: string) => void
   onImport: (files: File[]) => void
+  /** open the accented letters picker (shown once the font has left-to-right letters) */
+  onAccents?: () => void
   /** weights compatibility, when the project has several weights */
   compat?: CompatReport | null
 }
 
-export function GlyphGrid({ glyphs, info, selected, onSelect, onImport, compat }: Props) {
+export function GlyphGrid({ glyphs, info, selected, onSelect, onImport, onAccents, compat }: Props) {
   const fileInput = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const svgs = (list: FileList | null) => [...(list ?? [])].filter((f) => f.name.toLowerCase().endsWith('.svg'))
 
-  const sections = new Map<Section, Glyph[]>()
+  const sections = new Map<string, Glyph[]>()
   for (const g of glyphs) {
     const s = sectionOf(g)
     sections.set(s, [...(sections.get(s) ?? []), g])
@@ -48,6 +48,12 @@ export function GlyphGrid({ glyphs, info, selected, onSelect, onImport, compat }
           title="Add SVG files to the project (or drop them here)">
           <span className="plus">+</span> Import SVGs…
         </button>
+        {onAccents && (
+          <button className="import-button secondary-action" onClick={onAccents}
+            title="Build é, ü, ñ… from the letters and accents you've drawn">
+            <span className="plus">+</span> Accented letters…
+          </button>
+        )}
         <input ref={fileInput} type="file" accept=".svg,image/svg+xml" multiple hidden
           onChange={(e) => {
             const files = svgs(e.target.files)
@@ -56,7 +62,11 @@ export function GlyphGrid({ glyphs, info, selected, onSelect, onImport, compat }
           }} />
       </div>
       {dragging && <div className="drop-hint">Drop SVGs to import</div>}
-      {ORDER.filter((s) => sections.has(s)).map((s) => (
+      {[...sections.keys()].sort((a, b) => {
+        const [ra, na] = sectionRank(a)
+        const [rb, nb] = sectionRank(b)
+        return ra - rb || na.localeCompare(nb)
+      }).map((s) => (
         <section key={s}>
           <h3>
             {s} <span className="count">{sections.get(s)!.length}</span>

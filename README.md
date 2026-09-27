@@ -180,9 +180,43 @@ regenerated, so `fontmake -u font.ufo` works without the app.
 | `uni05D1.salt.svg`, `uni05D1.ss01.svg` | unencoded alternate, substituted by `salt` / `ss01` |
 | `uni05D1.alt2.svg` | unencoded alternate, no automatic feature |
 | `uni05D0_uni05DC.liga.svg` | ligature glyph plus a `liga` rule (`.dlig` for discretionary) |
-| `uni05D0-Bold.svg` | variable-font master (Phase 2, ignored for now) |
+| `a.svg`, `uni0061.svg`, `Aacute.svg` | Latin letters: AGL names or code points |
+| `uni0301.svg` | combining accent (acute), placed by anchors |
+| `uni0301.case.svg` | the accent's capital-letter version, used on capitals |
 
 Final (sofit) letters have their own code points (`uni05DA.svg` etc.).
+
+### Bilingual fonts (Hebrew with Latin, Greek, Cyrillic)
+
+A project can hold several scripts. Each glyph's script comes from Unicode,
+and the rest follows from it:
+
+- **Glyph panel:** one section per script (Hebrew, Hebrew marks, Latin…),
+  then Accents (combining accents shared by Latin, Greek and Cyrillic),
+  Numbers & punctuation (shared by every script), and alternates.
+- **Language systems** (`languagesystem hebr`, `latn`…) are written for the
+  scripts present; the Project tab lists them.
+- **Anchors:** Latin, Greek and Cyrillic letters start with `top` (at x-height
+  or cap height) and `bottom`; combining accents get `_top` or `_bottom` from
+  their Unicode class. Hebrew keeps its own set (dagesh, shin/sin dots).
+- **Accented letters…** (glyph panel) builds é, ü, ñ, ǘ… from base letters and
+  accents you've drawn: each accent sits on the letter's matching anchor. They
+  are components, rebuilt whenever you redraw a part or move an anchor, in
+  every master, and they join the base letter's kerning groups. i and j take
+  top accents on dotless ı/ȷ when the font has them; capitals use a `.case`
+  accent when there is one. **Draw it instead** turns one into a normal SVG.
+- **Mixed text:** the preview splits lines into right-to-left and
+  left-to-right runs (the Unicode Bidirectional Algorithm) and shapes each in
+  its own direction, so Hebrew with Latin words and numbers reads correctly.
+- **Kerning** follows each pair's direction: in בת the first letter is on the
+  right, in AV on the left. Groups are "first letter" and "second letter".
+- **Harmony:** **Guides** (Project tab) add named lines to the glyph editor,
+  e.g. the height Hebrew letters share next to Latin capitals and x-height.
+  **Compare with** (glyph panel) shows letters from any script beside the one
+  you're editing, to match heights and stroke weight.
+
+Arabic and other joining scripts aren't covered (they need joining forms and
+cursive attachment).
 
 ### Importing SVGs from anywhere
 
@@ -310,12 +344,13 @@ ligatures and alternates → compile → RTL preview, plus project handling
 (project files, New/Open/recent, snapshots) and the live Illustrator round
 trip (folder watcher, Edit in Illustrator).
 
-Next:
-- Variable fonts (Phase 2): axes (weight, width, optical size, slant,
-  italic, grade, custom), compatibility checks, point order fixes and
-  variable export are done
-- Bilingual/multilingual fonts, Hebrew + Latin first (Phase 3, the end
-  goal; see the brief)
+Phase 2, variable fonts: axes (weight, width, optical size, slant, italic,
+grade, custom), compatibility checks, point order fixes and variable export.
+
+Phase 3, bilingual fonts: Hebrew with Latin (and Greek, Cyrillic) in one
+font: per-script glyph sections, anchors and language systems, accented
+letters built from parts, a bidi-aware preview, direction-aware kerning, and
+guides and side-by-side comparison for matching the scripts.
 
 ## License
 

@@ -12,6 +12,8 @@ export interface Glyph {
   char: string
   /** readable ASCII name for Hebrew letters (e.g. "bet"), used for default group names */
   niceName: string | null
+  /** Unicode script: Hebr, Latn, Grek, Cyrl...; Zyyy for shared digits and punctuation, Zinh for combining accents */
+  script: string | null
   category: Category
   width: number
   source: string | null
@@ -23,6 +25,19 @@ export interface Glyph {
   anchors: Anchor[]
   path: string
   bounds: [number, number, number, number] | null
+  /** an accented letter built from parts: its base letter and marks (glyph names) */
+  composite: { base: string; marks: string[] } | null
+}
+
+/** An accented letter the font could build from letters and marks it has. */
+export interface CompositeCandidate {
+  unicode: number
+  char: string
+  name: string
+  base: string
+  marks: string[]
+  /** what's missing, or null when it can be built */
+  problem: string | null
 }
 
 export interface FontInfo {
@@ -57,8 +72,16 @@ export interface GapMarker {
   offset: number
 }
 
+/** An extra horizontal line in the glyph editor, e.g. the height Hebrew letters share. */
+export interface Guide {
+  name: string
+  y: number
+}
+
 export interface ProjectSettings {
   previewText?: string
+  /** extra guide lines (shared by every master) */
+  guides?: Guide[]
   /** height of the preview strip, px */
   previewHeight?: number
   /** what Export writes, remembered per project */
@@ -90,6 +113,10 @@ export interface Project {
   weight: string
   weights: WeightInfo[]
   axes: AxisDef[]
+  /** the scripts in the font, Hebrew first */
+  scripts: { code: string; name: string; direction: 'rtl' | 'ltr' | null }[]
+  /** OpenType languagesystem statements, e.g. [["DFLT","dflt"],["hebr","dflt"]] */
+  languageSystems: [string, string][]
   /** single weight still directly in glyphs/ + font.ufo (moves to glyphs/<Weight>/ when a second is added) */
   flatLayout: boolean
   /** the .fonttastic file */
@@ -299,6 +326,11 @@ export const api = {
   fixAll: () =>
     call<{ fixed: string[]; errors: Record<string, string>; compat: CompatReport; project: Project }>(
       'POST', '/api/compat/fix'),
+  compositeCandidates: () => call<{ candidates: CompositeCandidate[] }>('GET', '/api/composites'),
+  addComposites: (unicodes: number[]) =>
+    call<{ added: string[]; errors: Record<string, string>; project: Project }>('POST', '/api/composites', { unicodes }),
+  drawInstead: (glyph: string) =>
+    call<{ path: string; app: string; project: Project }>('POST', `/api/glyphs/${encodeURIComponent(glyph)}/draw-instead`),
   revealGlyph: (glyph: string) => call<{ path: string }>('POST', `/api/glyphs/${encodeURIComponent(glyph)}/reveal`),
   setAnchors: (glyph: string, anchors: Anchor[]) =>
     call<Glyph>('PUT', `/api/glyphs/${encodeURIComponent(glyph)}/anchors`, { anchors }),

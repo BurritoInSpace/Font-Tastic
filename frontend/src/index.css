@@ -544,3 +544,26 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .masters-table td.num-cell input { width: 80px; }
 .instances-table th.num-cell { text-align: right; }
 .instances-table td.num-cell input { width: 80px; }
+.preview-lines .line.ltr { align-self: flex-end; } /* the container runs right-to-left: flex-end is the left edge */
+
+/* Accented letters */
+.grid-actions { display: flex; flex-direction: column; gap: 6px; }
+.import-button.secondary-action { height: 36px; font-size: 14px; }
+.composite-info { background: rgba(90, 118, 210, 0.1); border-left: 3px solid var(--ft-blue); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.composite-info p { margin: 0; font-size: 13px; }
+.accents-dialog { width: min(760px, 100%); }
+.accents-body { padding: 4px 22px 18px; display: flex; flex-direction: column; gap: 12px; max-height: 60vh; overflow: auto; }
+.accent-groups { display: flex; flex-direction: column; gap: 6px; }
+.accent-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.accent-base { width: 28px; font-size: 18px; color: var(--fg-muted); text-align: center; }
+.accent-chip { min-width: 36px; height: 36px; font-size: 20px; padding: 0 6px; background: var(--ft-bg); color: var(--ft-white); border: 1px solid transparent; }
+.accent-chip.on { background: var(--ft-yellow); color: var(--ft-black); }
+.accent-chip:disabled { opacity: 0.3; }
+
+/* Cross-script harmony */
+.canvas .metric.guide { stroke: var(--ft-blue); stroke-dasharray: 10 8; }
+.canvas .metric-label.guide { fill: var(--ft-blue); }
+.canvas .compare-ghost { fill: var(--glyph); opacity: 0.35; }
+.compare-row label { white-space: nowrap; }
+.guides-table { width: auto; align-self: flex-start; }
+.guides-table td.num-cell input { width: 80px; }

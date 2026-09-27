@@ -217,7 +217,11 @@ visual polish that the redesign will replace.
   looks generic and can be mistaken for a system or browser warning, so it
   should become an in-app dialog in the app's own style.
 
-## Bilingual / multilingual fonts (Phase 3, not urgent)
+## Bilingual / multilingual fonts (Phase 3) — done for Hebrew + Latin family
+
+*Built: Hebrew with Latin, Greek and Cyrillic (script-generic). Accented
+letters are built from base letters and marks as components. Arabic and other
+joining scripts are out of scope.*
 
 **The end goal:** use the app to build bilingual and eventually multilingual
 fonts, with Hebrew as the first script. The typical target is Hebrew + Latin

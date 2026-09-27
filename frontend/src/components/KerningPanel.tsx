@@ -140,12 +140,18 @@ export function KerningPanel({ project, onChanged, onError }: Props) {
   const ctx = charsToGlyphs(project, context) ?? []
   const sequence = [...ctx, first, second, ...ctx].map((n) => byName.get(n)).filter((g): g is Glyph => !!g)
   const kernOf = (a: string, b: string) => resolveKern(project, live, a, b).value
-  const placed = layoutRun(sequence, kernOf, ctx.length)
+  // Hebrew pairs read right to left, Latin left to right; digits and
+  // punctuation follow the context letters, else the font's first script.
+  const rtl = pairIsRtl(project, [byName.get(first), byName.get(second), ...ctx.map((n) => byName.get(n))])
+  const placed = layoutRun(sequence, kernOf, ctx.length, rtl)
+  const sideName = (side: Side) => side === 1
+    ? `First letter (${rtl ? 'right' : 'left'})`
+    : `Second letter (${rtl ? 'left' : 'right'})`
 
   // Gap markers sit at each letter's ink edge facing the other, measured on
   // the letter body (baseline to cap height), and extend into the gap.
   const band: [number, number] = [0, project.info.capHeight]
-  const [leftHot, rightHot] = placed.filter((p) => p.hot) // visual order: left-hand letter, right-hand letter
+  const [leftHot, rightHot] = placed.filter((p) => p.hot).sort((a, b) => a.x - b.x) // left-hand, right-hand
   const markers: Marker[] = []
   if (leftHot && rightHot) {
     const inkL = inkExtent(leftHot.glyph.path, ...band)
@@ -153,16 +159,17 @@ export function KerningPanel({ project, onChanged, onError }: Props) {
     if (inkL && inkR) {
       const leftEdge = leftHot.x + inkL.xMax // right edge of the left-hand letter's ink
       const rightEdge = rightHot.x + inkR.xMin // left edge of the right-hand letter's ink
-      const g1 = gaps['1']
-      const g2 = gaps['2']
-      if (g1.on) {
-        const x = rightEdge - g1.width + g1.offset
-        markers.push({ side: 1, x, width: g1.width, distance: x - leftEdge })
+      // A marker hangs off its letter's facing edge into the gap.
+      const fromRight = (side: Side, g: GapMarker) => {
+        const x = rightEdge - g.width + g.offset
+        return { side, x, width: g.width, distance: x - leftEdge }
       }
-      if (g2.on) {
-        const x = leftEdge + g2.offset
-        markers.push({ side: 2, x, width: g2.width, distance: rightEdge - (x + g2.width) })
+      const fromLeft = (side: Side, g: GapMarker) => {
+        const x = leftEdge + g.offset
+        return { side, x, width: g.width, distance: rightEdge - (x + g.width) }
       }
+      if (gaps['1'].on) markers.push(rtl ? fromRight(1, gaps['1']) : fromLeft(1, gaps['1']))
+      if (gaps['2'].on) markers.push(rtl ? fromLeft(2, gaps['2']) : fromRight(2, gaps['2']))
     }
   }
   // Fit: change the kern by exactly the distance, so the partner meets the marker.
@@ -223,18 +230,18 @@ export function KerningPanel({ project, onChanged, onError }: Props) {
       <div className="card light">
       <h2>Kerning</h2>
       <p className="muted small">
-        Type a pair the way you write it. For <span dir="rtl">בת</span> the first letter is bet, on the right.
-        Negative values pull the pair together. Kern whole groups of similar letters at once, then add exceptions
+        Type a pair the way you write it: in <span dir="rtl">בת</span> the first letter is bet, on the right; in AV
+        it's A, on the left. Negative values pull the pair together. Kern whole groups of similar letters at once, then add exceptions
         for single pairs that need their own value.
       </p>
 
-      <div className="row pair-picker" dir="rtl">
-        <input className="pair-input" dir="rtl" value={typed} placeholder="בת" maxLength={4}
+      <div className="row pair-picker" dir={rtl ? 'rtl' : 'ltr'}>
+        <input className="pair-input" dir="auto" value={typed} placeholder="בת / AV" maxLength={4}
           onChange={(e) => pickTyped(e.target.value)} />
-        <SideControl label="Right-hand letter" side={1} glyphs={glyphs} glyph={first} group={g1} level={levels[1]}
+        <SideControl label={sideName(1)} side={1} glyphs={glyphs} glyph={first} group={g1} level={levels[1]}
           onGlyph={setFirst} onLevel={(l) => setLevels({ ...levels, 1: l })} onNewGroup={() => void newGroupFrom(1, first)} />
         <span className="muted">+</span>
-        <SideControl label="Left-hand letter" side={2} glyphs={glyphs} glyph={second} group={g2} level={levels[2]}
+        <SideControl label={sideName(2)} side={2} glyphs={glyphs} glyph={second} group={g2} level={levels[2]}
           onGlyph={setSecond} onLevel={(l) => setLevels({ ...levels, 2: l })} onNewGroup={() => void newGroupFrom(2, second)} />
         <span className="spacer" />
         <input dir="auto" value={context} placeholder="context letters" onChange={(e) => setContext(e.target.value)} />
@@ -281,7 +288,7 @@ export function KerningPanel({ project, onChanged, onError }: Props) {
             {sortedPairs.map((k) => (
               <tr key={pairKey(k.first, k.second)} className={pairKey(k.first, k.second) === editKey ? 'active' : ''}
                 onClick={() => openPair(k.first, k.second)}>
-                <td className="seq" dir="rtl">
+                <td className="seq" dir={pairIsRtl(project, [k.first, k.second].map((key) => byName.get(membersOf(project, key)[0] ?? key))) ? 'rtl' : 'ltr'}>
                   <SideChip byName={byName} k={k.first} /> <SideChip byName={byName} k={k.second} />
                 </td>
                 <td className="muted small">
@@ -319,7 +326,7 @@ export function KerningPanel({ project, onChanged, onError }: Props) {
           your target gap; Fit kerns the pair so the other letter just touches it.
         </p>
         {([1, 2] as Side[]).map((side) => (
-          <GapControl key={side} side={side} label={side === 1 ? 'Right-hand letter' : 'Left-hand letter'}
+          <GapControl key={side} side={side} label={sideName(side)}
             gap={gaps[`${side}`]} marker={markers.find((m) => m.side === side)}
             onChange={(p) => updateGap(side, p)} onFit={fit} />
         ))}
@@ -370,12 +377,12 @@ function SideControl({ label, side, glyphs, glyph, group, level, onGlyph, onLeve
 
 const SIDE_INFO: Record<Side, { title: string; hint: string }> = {
   1: {
-    title: 'Right-hand letter groups',
-    hint: 'Letters whose left edge looks alike: the edge that faces the next letter.',
+    title: 'First-letter groups',
+    hint: 'Letters whose edge facing the next letter looks alike: the left edge in Hebrew, the right edge in Latin.',
   },
   2: {
-    title: 'Left-hand letter groups',
-    hint: 'Letters whose right edge looks alike: the edge that faces the previous letter.',
+    title: 'Second-letter groups',
+    hint: 'Letters whose edge facing the previous letter looks alike: the right edge in Hebrew, the left edge in Latin.',
   },
 }
 
@@ -433,7 +440,7 @@ function KernGroups({ project, glyphs, byName, onChanged, onError }: {
                         })()
                       }}>×</button>
                     </div>
-                    <div className="members" dir="rtl">
+                    <div className="members" dir="auto">
                       {members.map((m) => (
                         <span key={m} className="member" title={m}>
                           {byName.get(m)?.char || m}
@@ -465,7 +472,7 @@ function AddLetters({ project, onAdd, onError }: { project: Project; onAdd: (nam
     setText('')
   }
   return (
-    <input className="add-letters" dir="rtl" value={text} placeholder="+ letters" onChange={(e) => setText(e.target.value)}
+    <input className="add-letters" dir="auto" value={text} placeholder="+ letters" onChange={(e) => setText(e.target.value)}
       onKeyDown={(e) => e.key === 'Enter' && add()} onBlur={add} />
   )
 }
@@ -484,7 +491,7 @@ function NewGroup({ glyphs, onCreate }: { glyphs: Glyph[]; onCreate: (name: stri
       setLetters('')
     }}>
       <input value={name} placeholder="new group name" onChange={(e) => setName(e.target.value)} />
-      <input dir="rtl" className="add-letters" value={letters} placeholder="letters" onChange={(e) => setLetters(e.target.value)} />
+      <input dir="auto" className="add-letters" value={letters} placeholder="letters" onChange={(e) => setLetters(e.target.value)} />
       <button type="submit" disabled={!name.trim()}>Add</button>
     </form>
   )
@@ -510,14 +517,25 @@ interface Marker {
   distance: number
 }
 
-/** Lay a logical-order glyph sequence out right to left, applying kerning between neighbours. */
-function layoutRun(sequence: Glyph[], kernOf: (a: string, b: string) => number, firstIndex: number): Placed[] {
-  const visual = [...sequence].reverse()
+/** Whether a pair (and its context) reads right to left: the first letter with a direction decides. */
+function pairIsRtl(project: Project, glyphs: (Glyph | undefined)[]): boolean {
+  const direction = new Map(project.scripts.map((s) => [s.code, s.direction]))
+  for (const g of glyphs) {
+    const d = g?.script ? direction.get(g.script) : undefined
+    if (d) return d === 'rtl'
+  }
+  return (project.scripts[0]?.direction ?? 'rtl') === 'rtl'
+}
+
+/** Lay a logical-order glyph sequence out in its direction, applying kerning between neighbours. */
+function layoutRun(sequence: Glyph[], kernOf: (a: string, b: string) => number, firstIndex: number, rtl: boolean): Placed[] {
+  const visual = rtl ? [...sequence].reverse() : sequence
   const placed: Placed[] = []
   let x = 0
   visual.forEach((g, j) => {
-    if (j > 0) x += kernOf(g.name, visual[j - 1].name) // logical pair is (right, left)
-    const logicalIndex = sequence.length - 1 - j
+    // kerning is between logical neighbours: (right, left) in RTL, (left, right) in LTR
+    if (j > 0) x += rtl ? kernOf(g.name, visual[j - 1].name) : kernOf(visual[j - 1].name, g.name)
+    const logicalIndex = rtl ? sequence.length - 1 - j : j
     placed.push({ glyph: g, x, hot: logicalIndex === firstIndex || logicalIndex === firstIndex + 1 })
     x += g.width
   })

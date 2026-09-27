@@ -40,7 +40,7 @@ import ufoLib2
 from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.svgPathPen import SVGPathPen
 
-from . import axes, features, hebrew, naming, resequence
+from . import axes, composites, features, hebrew, naming, resequence, scripts
 from .errors import ProjectError
 from .svg_import import outline_to_svg, parse_svg, read_svg
 
@@ -564,12 +564,12 @@ class Project:
             if not SAFE_NAME.match(name) and name != ".notdef":
                 raise ProjectError(f"{name!r} can't be used as a file name")
             info = self.font.info
-            bounds = _bounds(glyph)
+            bounds = _bounds(glyph, self.font)
             width = glyph.width
             if width <= 0:  # marks: the artboard only needs to hold the drawing
                 width = max(round(bounds[2]) + 100 if bounds else 0, round(info.unitsPerEm * 0.6))
             path = self.glyphs_dir / (source or f"{name}.svg")
-            path.write_text(outline_to_svg(glyph, width, info.ascender, info.descender), encoding="utf-8")
+            path.write_text(outline_to_svg(glyph, width, info.ascender, info.descender, self.font), encoding="utf-8")
             glyph.lib.pop(RESEQUENCE, None)  # the new SVG is drawn in the fixed order already
             self._import_glyph(path, naming.parse_filename(path.stem))
             self._commit()
@@ -594,6 +594,8 @@ class Project:
             else:
                 contours = fixed
         resequence.write_contours(glyph, contours)
+        glyph.clearComponents()  # an accented letter redrawn as an SVG is a drawing from now on
+        glyph.lib.pop(composites.COMPOSITE, None)
         glyph.unicodes = [parsed.unicode] if parsed.unicode is not None else []
         glyph.lib.pop(AUTO, None)
         glyph.lib[SOURCE] = path.name
@@ -620,13 +622,73 @@ class Project:
         bounds = _bounds(glyph)
         cp = parsed.unicode
         if category == "mark":
-            anchor_class = hebrew.mark_anchor_class(naming.unicode_of_base(parsed.base_name))
-            pos = anchor_class and hebrew.default_mark_anchor(anchor_class, bounds, info.capHeight)
-            if pos:
-                glyph.appendAnchor({"name": f"_{anchor_class}", "x": pos[0], "y": pos[1]})
-        elif hebrew.is_hebrew_letter(cp):
-            for name, x, y in hebrew.default_base_anchors(cp, glyph.width, bounds, info.capHeight):
+            found = scripts.mark_anchor(naming.unicode_of_base(parsed.base_name), bounds, info,
+                                        capital=parsed.suffix == "case")
+            if found:
+                anchor_class, (x, y) = found
+                glyph.appendAnchor({"name": f"_{anchor_class}", "x": x, "y": y})
+        else:
+            for name, x, y in scripts.base_anchors(cp, glyph.width, bounds, info):
                 glyph.appendAnchor({"name": name, "x": x, "y": y})
+
+    # -- accented letters built from parts ---------------------------------------
+
+    def composite_candidates(self) -> list[dict]:
+        with self.lock:
+            return composites.candidates(self.font)
+
+    def add_composites(self, unicodes: list[int]) -> dict:
+        """Build accented letters from their base letter and marks, in every
+        weight (each with its own anchors). They join their base letter's
+        kerning groups. Returns ``{"added": [glyphs], "errors": {char: why}}``."""
+        with self.lock:
+            cmap = composites._cmap(self.font)
+            plans, errors = {}, {}
+            for cp in unicodes:
+                if cp in cmap:
+                    errors[chr(cp)] = "already in the font"
+                    continue
+                try:
+                    plans[cp] = composites.recipe_for(self.font, cp, cmap)
+                except composites.CompositeError as exc:
+                    errors[chr(cp)] = str(exc)
+            names = {cp: naming.canonical_name(cp) for cp in plans}
+            clash = [n for n in names.values() if n in self.font]
+            if clash:
+                raise ProjectError(f"{', '.join(clash)} already exist")
+
+            def build_here():
+                added = []
+                for cp, recipe in plans.items():
+                    try:
+                        composites.build(self.font, names[cp], cp, recipe)
+                        added.append(names[cp])
+                    except composites.CompositeError as exc:  # e.g. an anchor missing in this weight
+                        errors.setdefault(chr(cp), str(exc))
+                        if names[cp] in self.font:
+                            del self.font[names[cp]]
+                for cp, recipe in plans.items():
+                    if names[cp] not in self.font:
+                        continue
+                    for group, members in self.font.groups.items():
+                        if recipe["base"] in members and names[cp] not in members:
+                            self.font.groups[group] = [*members, names[cp]]
+                return added
+
+            added = self._each_weight(build_here)
+            return {"added": added, "errors": errors}
+
+    def draw_instead(self, name: str) -> Path:
+        """Turn a built accented letter into a drawing: its outline is written
+        to an SVG in every weight, to edit in Illustrator like any glyph."""
+        with self.lock:
+            if composites.COMPOSITE not in self.glyph(name).lib:
+                raise ProjectError(f"{name} isn't built from parts")
+
+            def here():
+                return self.source_svg(name)
+
+            return self._each_weight(here, only_with=name)
 
     # -- point order (re-sequencing) --------------------------------------------
 
@@ -744,8 +806,8 @@ class Project:
                     with self._in_weight(default):
                         if name in self.font:
                             ref = self.font[name]
-                            out["reference"] = {"contours": describe(ref), "path": glyph_svg_path(ref),
-                                                "bounds": _bounds(ref)}
+                            out["reference"] = {"contours": describe(ref), "path": glyph_svg_path(ref, self.font),
+                                                "bounds": _bounds(ref, self.font)}
             return out
 
     def duplicate_mark(self, source: str, target_cp: int) -> str:
@@ -1041,7 +1103,7 @@ class Project:
     def _role(self, name: str):
         parsed = naming.parse_filename(name)
         category = naming.category_for(parsed)
-        mark_class = hebrew.mark_anchor_class(naming.unicode_of_base(parsed.base_name)) if category == "mark" else None
+        mark_class = scripts.mark_anchor_class(naming.unicode_of_base(parsed.base_name)) if category == "mark" else None
         return category, mark_class
 
     def _apply_renames(self, mapping: dict[str, str]):
@@ -1083,6 +1145,14 @@ class Project:
         glyph = self.font[old]
         path = self._source_path(old)
         self.font.renameGlyph(old, new)
+        for other in self.font:  # accented letters built from it follow the new name
+            for component in other.components:
+                if component.baseGlyph == old:
+                    component.baseGlyph = new
+            recipe = other.lib.get(composites.COMPOSITE)
+            if recipe:
+                recipe["base"] = new if recipe["base"] == old else recipe["base"]
+                recipe["marks"] = [new if m == old else m for m in recipe["marks"]]
         if path:
             target = self.glyphs_dir / f"{new}.svg"
             path.rename(target)
@@ -1245,6 +1315,10 @@ class Project:
 
     def _update_derived(self):
         font = self.font
+        problems = composites.refresh(font)
+        for glyph in font:
+            if composites.COMPOSITE in glyph.lib:
+                glyph.lib[WARNINGS] = [problems[glyph.name]] if glyph.name in problems else []
         categories, alternates = {}, {}
         for glyph in font:
             if glyph.lib.get(AUTO) and glyph.name == ".notdef":
@@ -1297,6 +1371,11 @@ class Project:
                     for (first, second), value in sorted(self.font.kerning.items())
                 ],
                 "kernGroups": self.kern_groups(),
+                "scripts": [
+                    {"code": s, "name": scripts.name_of(s), "direction": scripts.direction(s)}
+                    for s in scripts.present(self.font)
+                ],
+                "languageSystems": [list(ls) for ls in scripts.language_systems(self.font)],
                 "niqqud": [
                     {"unicode": cp, "name": name, "anchor": anchor}
                     for cp, (name, anchor) in sorted(hebrew.NIQQUD.items())
@@ -1309,6 +1388,7 @@ class Project:
             "unicode": glyph.unicodes[0] if glyph.unicodes else None,
             "char": naming.display_char(glyph.name),
             "niceName": hebrew.LETTER_NAMES.get(glyph.unicodes[0]) if glyph.unicodes else None,
+            "script": scripts.script_of(glyph.name),
             "category": categories.get(glyph.name, "base"),
             "width": glyph.width,
             "source": glyph.lib.get(SOURCE),
@@ -1317,8 +1397,9 @@ class Project:
             "warnings": glyph.lib.get(WARNINGS, []),
             "widthOverride": bool(glyph.lib.get(WIDTH_OVERRIDE)),
             "anchors": [{"name": a.name, "x": a.x, "y": a.y} for a in glyph.anchors],
-            "path": glyph_svg_path(glyph),
-            "bounds": _bounds(glyph),
+            "path": glyph_svg_path(glyph, self.font),
+            "bounds": _bounds(glyph, self.font),
+            "composite": glyph.lib.get(composites.COMPOSITE),
         }
 
     def glyph_detail(self, name: str) -> dict:
@@ -1343,18 +1424,19 @@ def glyph_preview(project_file: str | Path) -> dict | None:
             continue
         glyph = font[name]
         if len(glyph):
-            return {"name": name, "path": glyph_svg_path(glyph), "bounds": _bounds(glyph)}
+            return {"name": name, "path": glyph_svg_path(glyph, font), "bounds": _bounds(glyph, font)}
     return None
 
 
-def glyph_svg_path(glyph) -> str:
-    pen = SVGPathPen(None)
+def glyph_svg_path(glyph, glyph_set=None) -> str:
+    """SVG path data; components (accented letters) are drawn out through ``glyph_set``."""
+    pen = SVGPathPen(glyph_set)
     glyph.draw(pen)
     return pen.getCommands()
 
 
-def _bounds(glyph):
-    pen = BoundsPen(None)
+def _bounds(glyph, glyph_set=None):
+    pen = BoundsPen(glyph_set)
     glyph.draw(pen)
     return list(pen.bounds) if pen.bounds else None
 

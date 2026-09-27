@@ -1,15 +1,37 @@
 import type { Glyph, Project } from './api'
 
-export const STANDARD_ANCHORS = ['top', 'bottom', 'dagesh', 'shindot', 'sindot']
+/** Anchor names offered for a glyph: Hebrew has dagesh and the shin/sin dots too. */
+export function standardAnchors(script: string | null): string[] {
+  return script === 'Hebr' ? ['top', 'bottom', 'dagesh', 'shindot', 'sindot'] : ['top', 'bottom']
+}
 
-export type Section = 'Letters' | 'Marks' | 'Alternates & ligatures' | 'Other'
+const SCRIPT_NAMES: Record<string, string> = { Hebr: 'Hebrew', Latn: 'Latin', Grek: 'Greek', Cyrl: 'Cyrillic' }
+const SCRIPT_ORDER = ['Hebr', 'Latn', 'Grek', 'Cyrl']
+export const scriptName = (code: string) => SCRIPT_NAMES[code] ?? code
 
-export function sectionOf(g: Glyph): Section {
-  if (g.category === 'mark') return 'Marks'
+/** Unicode's "common" (digits, punctuation, space) and "inherited" (combining accents) scripts. */
+const COMMON = 'Zyyy'
+const INHERITED = 'Zinh'
+
+/** The glyph grid section a glyph goes in: one per script (letters, then its marks), then shared ones. */
+export function sectionOf(g: Glyph): string {
   if (g.category === 'ligature' || (g.unicode === null && g.name.includes('.') && !g.name.startsWith('.')))
     return 'Alternates & ligatures'
-  if (g.unicode !== null && g.unicode >= 0x05d0 && g.unicode <= 0x05ea) return 'Letters'
+  const s = g.script
+  if (g.category === 'mark') return !s || s === INHERITED ? 'Accents' : `${scriptName(s)} marks`
+  if (s === COMMON) return 'Numbers & punctuation'
+  if (s && s !== INHERITED) return scriptName(s)
   return 'Other'
+}
+
+/** Section order: Hebrew, Latin, Greek, Cyrillic, other scripts, then the shared sections. */
+export function sectionRank(section: string): [number, string] {
+  const tail = ['Accents', 'Numbers & punctuation', 'Alternates & ligatures', 'Other']
+  if (tail.includes(section)) return [1000 + tail.indexOf(section), section]
+  const script = section.replace(/ marks$/, '')
+  const code = Object.entries(SCRIPT_NAMES).find(([, n]) => n === script)?.[0] ?? script
+  const i = SCRIPT_ORDER.indexOf(code)
+  return [(i === -1 ? 100 : i) * 2 + (section.endsWith(' marks') ? 1 : 0), section]
 }
 
 export function glyphLabel(g: Glyph): string {
@@ -30,15 +52,26 @@ export function charsToGlyphs(project: Project, text: string): string[] | null {
   return names
 }
 
-/** Marks that attach to a given base anchor name (`top` -> marks with `_top`). */
-export function marksFor(project: Project, anchorName: string): Glyph[] {
-  return project.glyphs.filter((g) => g.anchors.some((a) => a.name === `_${anchorName}`))
+/**
+ * Whether a mark belongs with a base: the same script, or a shared base (digits...).
+ * Combining accents (U+0300 block) are shared by Latin, Greek and Cyrillic, not by Hebrew.
+ */
+function sameScript(base: Glyph, mark: Glyph): boolean {
+  if (!base.script || base.script === COMMON || !mark.script) return true
+  if (mark.script === INHERITED) return base.script !== 'Hebr'
+  return base.script === mark.script
 }
 
-/** Bases that offer an anchor a mark attaches to (`_top` -> bases with `top`). */
-export function basesFor(project: Project, markAnchor: string): Glyph[] {
+/** Marks that attach to a given base anchor name (`top` -> marks with `_top`), of the base's script. */
+export function marksFor(project: Project, anchorName: string, base?: Glyph): Glyph[] {
+  return project.glyphs.filter((g) =>
+    g.anchors.some((a) => a.name === `_${anchorName}`) && (!base || sameScript(base, g)))
+}
+
+/** Bases that offer an anchor a mark attaches to (`_top` -> bases with `top`), of the mark's script. */
+export function basesFor(project: Project, markAnchor: string, mark?: Glyph): Glyph[] {
   const name = markAnchor.replace(/^_/, '')
   return project.glyphs.filter(
-    (g) => g.category !== 'mark' && g.anchors.some((a) => a.name === name),
+    (g) => g.category !== 'mark' && g.anchors.some((a) => a.name === name) && (!mark || sameScript(g, mark)),
   )
 }
