@@ -112,7 +112,8 @@ MyFont/
 
 A project can hold several masters: weights (Light, Regular, Bold…), and
 with more axes (see below) widths, optical sizes and so on. The menu at the
-top left switches between them, and **+ New master…** adds one. You pick
+top left switches between them (**Ctrl+S** flips back to the master you were
+on before), and **+ New master…** adds one. You pick
 where it sits on each axis (weight class, width…), its name (suggested from
 those, e.g. BoldCondensed), and which existing master it starts as a copy
 of: its SVGs, anchors, widths and kerning. You then redraw its SVGs in
@@ -170,7 +171,7 @@ font:
 - **Point order fixes:** **Fix** (one glyph) or **Fix all** in the variable
   tab reorders contours, direction and start points in every weight to follow
   the default weight. For a closer look, **Show points** in the glyph panel
-  numbers the points on the canvas: `#n` marks where contour n starts, an
+  numbers the points on the canvas, from 1 at each contour's start (tagged `C1`, `C2`…), an
   arrow shows its direction, and the default weight is shown alongside for
   comparison. Click a point to start its contour there, or reorder and
   reverse contours from the list. Fixes are stored with the glyph and
@@ -237,8 +238,8 @@ cursive attachment).
 
 ### Importing SVGs from anywhere
 
-**Import SVGs…** at the top of the glyph panel (or dropping files onto the
-panel) copies SVGs into `glyphs/` under their canonical names. Loose names
+**Import SVGs…** at the top of the glyph panel (or **Ctrl+I**, or dropping
+files onto the panel) copies SVGs into `glyphs/` under their canonical names. Loose names
 are understood: `א.svg`, `U+05D0.svg`, `alef.svg`, `kaf-sofit.svg`,
 `kamatz.svg`, `bet.salt.svg`, `alef_lamed.svg` (ligature). For anything
 else, the dialog shows the shape and asks what it is: a character, an
@@ -248,6 +249,12 @@ kept) or add it as a **stylistic alternate** (`salt` or `ss01`–`ss20`).
 Further alternates in the same feature are numbered (`uni05D1.salt.2`) and
 all show up in `salt`'s alternate list. A new alternate starts with its base
 glyph's anchors.
+
+For many files at once, the bar at the top of the dialog answers them all:
+**Replace all** (every file that can replace its glyph; a snapshot is taken
+first), **All as alternates**, **Skip all**, and **Skip all unrecognized**.
+**Only show files that still need an answer** hides the rest. Any single
+file can still be changed afterwards.
 
 ### Actions for many glyphs (the logo menu)
 
@@ -299,6 +306,10 @@ section, all of them, or by typing the letters.
   artboard back.
 - Draw niqqud where they would sit under or over a letter standing on the
   baseline. Their advance width is set to zero automatically.
+- A curve whose two handles are both retracted (Illustrator shows no handles)
+  is read as a straight line, even when the SVG writes it as a curve, so it
+  matches a master where the same segment was saved as a line. One handle
+  out is a real curve.
 - Overlapping shapes are fine: they're kept as drawn (variable fonts need
   that) and merged when static fonts are exported. Strokes aren't: use
   *Object › Path › Outline Stroke*. Hidden layers are skipped.
@@ -401,6 +412,13 @@ Phase 3, bilingual fonts: Hebrew with Latin (and Greek, Cyrillic) in one
 font: per-script glyph sections, anchors and language systems, accented
 letters built from parts, a bidi-aware preview, direction-aware kerning, and
 guides and side-by-side comparison for matching the scripts.
+
+## Keyboard shortcuts
+
+The Project tab lists them all. The main ones: **Ctrl+S** switches to the
+master you were on before, **Ctrl+I** imports SVGs, **Ctrl+E** edits the
+glyph in your drawing app, and in the kerning tab **↑ / ↓** step through the
+pairs.
 
 ## Making a release
 

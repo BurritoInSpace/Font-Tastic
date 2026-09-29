@@ -45,7 +45,7 @@ export function GlyphGrid({ glyphs, info, selected, onSelect, onImport, onAccent
     >
       <div className="grid-actions">
         <button className="import-button" onClick={() => fileInput.current?.click()}
-          title="Add SVG files to the project (or drop them here)">
+          title="Add SVG files to the project (or drop them here) · Ctrl+I">
           <span className="plus">+</span> Import SVGs…
         </button>
         {onAccents && (

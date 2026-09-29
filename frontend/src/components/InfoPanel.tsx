@@ -14,6 +14,22 @@ const FIELDS: { key: keyof FontInfo; label: string; numeric?: boolean }[] = [
   { key: 'xHeight', label: 'x-height', numeric: true },
 ]
 
+/** [where, keys, what it does] */
+const SHORTCUTS: [string, string, string][] = [
+  ['Anywhere', 'Ctrl+S', 'Switch to the master you were on before (and back)'],
+  ['Anywhere', 'Ctrl+I', 'Import SVGs'],
+  ['Anywhere', 'Esc', 'Close a menu or dialog'],
+  ['Toolbar', 'Shift+click Reimport', 'Re-read every SVG, not just changed ones'],
+  ['Glyph', 'Ctrl+E', 'Edit the glyph in your drawing app'],
+  ['Glyph', '← → ↑ ↓', 'Nudge the selected anchor by 1 (on a mark view: the mark)'],
+  ['Glyph', 'Shift+arrows', 'Nudge by 10'],
+  ['Glyph', 'Delete', 'Remove the selected anchor'],
+  ['Glyph', 'Shift+drag', 'Drag an anchor or mark in a straight line'],
+  ['Glyph', 'Drag an edge', "Change the side bearing or width (moves the SVG's artboard)"],
+  ['Kerning', '↑ ↓', 'Previous / next pair in the list'],
+  ['Kerning', 'Shift+click ← →', 'Move a gap marker by 1 instead of 5'],
+]
+
 interface Props {
   project: Project
   onChanged: (reimport: boolean) => void
@@ -95,6 +111,19 @@ export function InfoPanel({ project, onChanged, onRestored, onError, onDeleteWei
           </div>
         </>
       )}
+
+      <h4>Keyboard shortcuts</h4>
+      <table className="rules shortcuts">
+        <tbody>
+          {SHORTCUTS.map(([area, keys, what]) => (
+            <tr key={keys + what}>
+              <td className="muted small">{area}</td>
+              <td><kbd>{keys}</kbd></td>
+              <td>{what}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
       <h4>Guides</h4>
       <p className="muted small">

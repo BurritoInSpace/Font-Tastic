@@ -135,3 +135,13 @@ def test_coarse_rounding_is_reported():
 def test_whole_numbers_alone_are_not_called_rounding():
     # e.g. drawn on a grid in Inkscape: nothing shows the coordinates were rounded
     assert parse_svg(small("M1,1 L5,1 L5,5 L1,5 Z"), ASC, DESC).warnings == []
+
+
+def test_retracted_handles_are_a_straight_line():
+    # Illustrator can write a segment with no handles as a curve whose control
+    # points sit on its end points (here within the 2 decimal rounding).
+    out = parse_svg(small("M1,1 C1,1 5,1 5,1 L5,5 C5.01,5 1,5 1,5 Z"), ASC, DESC)
+    assert [op for op, _ in out.contours[0]] == ["moveTo", "lineTo", "lineTo", "lineTo", "closePath"]
+    # one handle out: a real curve
+    out = parse_svg(small("M1,1 C1,1 4,2 5,1 L5,5 L1,5 Z"), ASC, DESC)
+    assert [op for op, _ in out.contours[0]].count("curveTo") == 1  # (the contour may be reversed)

@@ -55,7 +55,8 @@ RESEQUENCE = f"{LIB}.resequence"  # point order fix, see resequence.py
 # Bump when the importer's output changes, so existing glyphs are re-read once.
 # 2: contours kept as drawn (no overlap merging).
 # 3: a closing segment that ends a rounding error away from the start is closed exactly.
-IMPORT_VERSION = 3
+# 4: curves with both handles retracted are read as straight lines.
+IMPORT_VERSION = 4
 
 DEFAULT_INFO = dict(unitsPerEm=1000, ascender=800, descender=-200, capHeight=700, xHeight=500)
 

@@ -133,8 +133,10 @@ def parse_svg(data: bytes, ascender: float, descender: float) -> ImportedOutline
             f"{decimals} decimal place{'s' if decimals != 1 else ''}. Save with more decimals (Illustrator: SVG "
             "options, Decimal Places; Inkscape: Preferences, Input/Output, SVG output, Numeric precision), or "
             "make the artboard 1000 px tall, so points land exactly.")
-    snap = max(2.0, grid * 1.5)
-    elements = [([_close_exactly(c, snap) for c in cs], rule) for cs, rule in elements]
+    # Points closer than this were one point before rounding (whole numbers
+    # alone don't show any rounding, so they only get the minimum).
+    snap = max(2.0, grid * 1.5 if decimals else 0)
+    elements = [([_close_exactly(_straighten(c, snap), snap) for c in cs], rule) for cs, rule in elements]
 
     contours: list[list[tuple]] = []
     for element_contours, rule in elements:
@@ -199,6 +201,25 @@ def _closed(contour):
     if contour[-1][0] in ("closePath", "endPath"):
         contour = contour[:-1]
     return contour + [("closePath", ())]
+
+
+def _straighten(contour, tolerance: float):
+    """A curve whose handles are both retracted (each on its own point, within
+    ``tolerance``) is a straight line: Illustrator shows no handles there,
+    but its SVG can still write the segment as a curve. Reading it as a line
+    keeps its structure the same as a master that wrote it as one. A curve
+    with only one handle retracted is a real curve and stays."""
+    out, current = [], None
+    for op, args in contour:
+        if op == "curveTo" and current is not None and len(args) == 3:
+            c1, c2, end = args
+            if (math.hypot(c1[0] - current[0], c1[1] - current[1]) <= tolerance
+                    and math.hypot(c2[0] - end[0], c2[1] - end[1]) <= tolerance):
+                op, args = "lineTo", (end,)
+        out.append((op, args))
+        if args and args[-1] is not None:
+            current = args[-1]
+    return out
 
 
 def _close_exactly(contour, tolerance: float):

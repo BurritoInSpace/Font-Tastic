@@ -33,6 +33,28 @@ export function ImportDialog({ project, uploads, onCancel, onDone }: Props) {
   const update = (i: number, patch: Partial<Decision>) =>
     setDecisions((ds) => ds.map((d, j) => (j === i ? { ...d, ...patch } : d)))
 
+  // Bulk answers, for imports with many files.
+  const [onlyPending, setOnlyPending] = useState(false)
+  const [bulkFeature, setBulkFeature] = useState('salt')
+  const duplicates = planned.filter((p) => p.duplicateOf)
+  const replaceable = duplicates.filter((p) => !p.duplicateInBatch).length
+  const alternatable = duplicates.filter((p) => p.canAlternate).length
+  const unrecognized = uploads
+    .map((u, i) => ({ u, d: decisions[i] }))
+    .filter(({ u, d }) => u.analysis.status === 'unknown' && d.identity === 'char' && !d.char.trim())
+  /** Set the same answer for every file that matches an existing glyph, where it's possible for that file. */
+  const answerDuplicates = (choice: 'replace' | 'alternate' | 'skip') =>
+    setDecisions((ds) => ds.map((d, i) => {
+      const p = planned[i]
+      if (!p.duplicateOf) return d
+      if (choice === 'replace' && p.duplicateInBatch) return d
+      if (choice === 'alternate' && !p.canAlternate) return d
+      return { ...d, onDuplicate: choice, dupFeature: choice === 'alternate' ? bulkFeature : d.dupFeature }
+    }))
+  const skipUnrecognized = () =>
+    setDecisions((ds) => ds.map((d, i) =>
+      uploads[i].analysis.status === 'unknown' && d.identity === 'char' && !d.char.trim() ? { ...d, identity: 'skip' } : d))
+
   const submit = async () => {
     setBusy(true)
     setError(null)
@@ -57,8 +79,42 @@ export function ImportDialog({ project, uploads, onCancel, onDone }: Props) {
           <h2>Import {uploads.length === 1 ? '1 SVG' : `${uploads.length} SVGs`}</h2>
           <span className="muted small">Files are copied into the project's glyphs/ folder under their glyph names.</span>
         </header>
+        {(duplicates.length > 0 || unrecognized.length > 0 || uploads.length > 6) && (
+          <div className="import-bulk">
+            {duplicates.length > 0 && (
+              <div className="row">
+                <span className="muted small">
+                  {duplicates.length} file{duplicates.length === 1 ? '' : 's'} match{duplicates.length === 1 ? 'es' : ''} a
+                  glyph already in the font:
+                </span>
+                <button disabled={replaceable === 0} onClick={() => answerDuplicates('replace')}
+                  title="Replace every glyph that can be replaced (anchors and spacing are kept; a snapshot is taken)">
+                  Replace all{replaceable < duplicates.length ? ` possible (${replaceable})` : ''}
+                </button>
+                <button disabled={alternatable === 0} onClick={() => answerDuplicates('alternate')}
+                  title="Keep the existing glyphs and add these as stylistic alternates">
+                  All as alternates
+                </button>
+                <FeatureSelect options={ALTERNATE_FEATURES} value={bulkFeature} onChange={setBulkFeature} />
+                <button onClick={() => answerDuplicates('skip')}>Skip all</button>
+              </div>
+            )}
+            {unrecognized.length > 0 && (
+              <div className="row">
+                <span className="muted small">
+                  {unrecognized.length} file{unrecognized.length === 1 ? '' : 's'} with a name that isn't a glyph:
+                </span>
+                <button onClick={skipUnrecognized}>Skip all unrecognized</button>
+              </div>
+            )}
+            <label className="check small">
+              <input type="checkbox" checked={onlyPending} onChange={(e) => setOnlyPending(e.target.checked)} />
+              Only show files that still need an answer{pending ? ` (${pending})` : ''}
+            </label>
+          </div>
+        )}
         <div className="import-rows">
-          {uploads.map((u, i) => (
+          {uploads.map((u, i) => onlyPending && planned[i].resolution.kind !== 'incomplete' ? null : (
             <ImportRow key={i} project={project} upload={u} decision={decisions[i]} planned={planned[i]}
               onChange={(patch) => update(i, patch)} />
           ))}

@@ -57,7 +57,10 @@ export function PointMarks({ contours, scale = 1, onPick }: {
   )
 }
 
-/** Numbers, drawn outside the flipped group so text reads upright. On-curve points are counted from 1. */
+/**
+ * Numbers, drawn outside the flipped group so text reads upright. Each contour's on-curve
+ * points are counted from 1 at its start point, which also gets a contour tag (C1, C2...).
+ */
 export function PointLabels({ contours, offset = { x: 0, y: 0 }, scale = 1 }: {
   contours: PointContour[]
   offset?: { x: number; y: number }
@@ -72,11 +75,23 @@ export function PointLabels({ contours, offset = { x: 0, y: 0 }, scale = 1 }: {
             {c.points.map(([x, y, kind], pi) => {
               if (kind === null) return null
               n += 1
-              return (
-                <text key={pi} className={pi === 0 ? 'start' : ''} fontSize={(pi === 0 ? 40 : 30) * scale}
+              const label = (
+                <text key={pi} className={pi === 0 ? 'start' : ''} fontSize={30 * scale}
                   x={x + offset.x + 16 * scale} y={-(y + offset.y) - 16 * scale}>
-                  {pi === 0 ? `#${ci + 1}` : n}
+                  {n}
                 </text>
+              )
+              if (pi !== 0) return label
+              // The start point counts as 1 like any other; which contour it is goes in
+              // its own tag on the other side, so it isn't read as a point number.
+              return (
+                <g key={pi}>
+                  {label}
+                  <text className="contour-tag" fontSize={24 * scale} textAnchor="end"
+                    x={x + offset.x - 30 * scale} y={-(y + offset.y) + 34 * scale}>
+                    C{ci + 1}
+                  </text>
+                </g>
               )
             })}
           </g>

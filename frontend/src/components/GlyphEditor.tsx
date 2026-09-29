@@ -770,7 +770,7 @@ function PointOrderSection({ glyph, points, weight, compat, onEdit, onMatch }: {
           {points.contours.map((c, i) => (
             <tr key={i}>
               <td><span className="swatch" style={{ background: CONTOUR_COLOURS[i % CONTOUR_COLOURS.length] }} /></td>
-              <td>#{i + 1}</td>
+              <td>C{i + 1}</td>
               <td className="muted small">
                 {c.points.filter((p) => p[2] !== null).length} points{' '}
                 <span title={c.closed ? (c.clockwise ? 'Clockwise' : 'Counter-clockwise') : 'Open path'}>
@@ -799,7 +799,7 @@ function PointOrderSection({ glyph, points, weight, compat, onEdit, onMatch }: {
         )}
       </div>
       <p className="hint">
-        Click a point on the canvas to start its contour there. #n marks where contour n starts; the arrow shows
+        Click a point on the canvas to start its contour there. Points count from 1 at each contour's start (Cn is contour n); the arrow shows
         its direction. Fixes are kept and reapplied when the SVG is edited again.
       </p>
     </div>

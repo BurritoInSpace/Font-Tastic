@@ -89,6 +89,34 @@ export default function App() {
     return () => window.clearTimeout(t)
   }, [multiWeight, projectRevision])
 
+  // App-wide shortcuts: Ctrl+S flips to the master edited before, Ctrl+I imports SVGs.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || !project) return
+      const key = e.key.toLowerCase()
+      if (key !== 's' && key !== 'i') return
+      e.preventDefault() // not the webview's "save page" / italics
+      if (document.querySelector('.modal-backdrop')) return
+      if (key === 'i') {
+        importInput.current?.click()
+        return
+      }
+      const names = project.weights.map((w) => w.name)
+      if (names.length < 2) {
+        setMessage({ text: 'Only one master: add one from the menu at the top left to switch between them' })
+        return
+      }
+      const last = lastWeight.current
+      const target = last && last !== project.weight && names.includes(last)
+        ? last
+        : names[(names.indexOf(project.weight) + 1) % names.length]
+      void switchWeight(target)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project])
+
   // Keep the selection in the URL so reloads (and dev hot-reloads) keep it.
   useEffect(() => {
     history.replaceState(null, '', selected ? `#${encodeURIComponent(selected)}` : location.pathname)
@@ -160,8 +188,13 @@ export default function App() {
     }
   }
 
+  // The master edited before this one, for Ctrl+S.
+  const lastWeight = useRef<string | null>(null)
+  const importInput = useRef<HTMLInputElement>(null)
+
   const switchWeight = async (name: string) => {
     try {
+      if (project && project.weight !== name) lastWeight.current = project.weight
       const res = await api.switchWeight(name)
       setProject(res.project)
       setMessage({ text: `Editing ${name}` })
@@ -215,7 +248,7 @@ export default function App() {
         }} />
         <div className="topbar-title">
           <div className="font-name" title={project.file}>{project.name}</div>
-          <select className="weight-menu" value={project.weight} title="Master being edited"
+          <select className="weight-menu" value={project.weight} title="Master being edited (Ctrl+S: switch to the one before)"
             onChange={(e) => e.target.value === '+new' ? setNewWeight(true) : void switchWeight(e.target.value)}>
             {project.weights.map((w) => (
               <option key={w.name} value={w.name}>{w.name} · {describeLocation(project.axes, w.location)}</option>
@@ -257,6 +290,13 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      <input ref={importInput} type="file" accept=".svg,image/svg+xml" multiple hidden
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])].filter((f) => f.name.toLowerCase().endsWith('.svg'))
+          e.target.value = ''
+          if (files.length) void importFiles(files)
+        }} />
 
       <main className="workspace">
         <GlyphGrid glyphs={project.glyphs} info={project.info} selected={selected} compat={compat}
@@ -308,6 +348,7 @@ export default function App() {
         <NewWeightDialog project={project} onCancel={() => setNewWeight(false)}
           onDone={(next, name) => {
             setNewWeight(false)
+            lastWeight.current = project.weight
             setProject(next)
             setMessage({ text: `Added ${name}, a copy to redraw. Editing it now.` })
           }} />
