@@ -134,7 +134,8 @@ variable fonts need.
 - **Export** opens a dialog to choose what goes into `build/`: single weights
   as OTF and/or TTF (all weights or just some), and the variable font as OTF
   and/or TTF when the weights match (see below). The choice is remembered per
-  project.
+  project. Tick **Open the folder when done** to have the `build/` folder
+  open in Explorer after exporting.
 - Removing a weight (Project tab) moves its files into
   `snapshots/removed-weights/` instead of deleting them.
 
@@ -167,7 +168,9 @@ font:
   variable tab, sorted into *needs redrawing*, *fixable in the app* (a
   different start point or contour order) and *may look off in between*
   (warnings). In the glyph list, a red **≠** or orange **↻** badge marks the
-  glyphs concerned.
+  glyphs concerned. Each glyph in the list shows its character and name
+  (e.g. "ה hebrew letter he"); clicking a problem opens the glyph in the
+  points view and briefly flashes the contour or segment it's about.
 - **Point order fixes:** **Fix** (one glyph) or **Fix all** in the variable
   tab reorders contours, direction and start points in every weight to follow
   the default weight. For a closer look, **Show points** in the glyph panel

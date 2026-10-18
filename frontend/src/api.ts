@@ -14,6 +14,8 @@ export interface Glyph {
   niceName: string | null
   /** Unicode script: Hebr, Latn, Grek, Cyrl...; Zyyy for shared digits and punctuation, Zinh for combining accents */
   script: string | null
+  /** e.g. "hebrew letter he", "latin small letter e" */
+  unicodeName: string | null
   category: Category
   width: number
   source: string | null
@@ -96,7 +98,7 @@ export interface ProjectSettings {
   /** height of the preview strip, px */
   previewHeight?: number
   /** what Export writes, remembered per project */
-  export?: { staticFormats: string[]; weights: string[] | null; variableFormats: string[] }
+  export?: { staticFormats: string[]; weights: string[] | null; variableFormats: string[]; openFolder?: boolean }
   opticalGap?: Record<'1' | '2', GapMarker>
 }
 
@@ -152,7 +154,18 @@ export interface CompatProblem {
   /** error: can't build; fixable: re-sequencing fixes it; warning: builds, may look off */
   severity: 'error' | 'fixable' | 'warning'
   message: string
+  /** which contour (from 0), when the problem is in one */
+  contour?: number
+  /** for a segment: the numbers of its end points, counted from 1 at the contour's start */
+  points?: [number, number]
   [detail: string]: unknown
+}
+
+/** A spot to point out briefly in the points view (key: a new one flashes again). */
+export interface PointFocus {
+  contour?: number
+  points?: [number, number]
+  key: number
 }
 
 export interface PointContour {
@@ -377,6 +390,7 @@ export const api = {
     }
     return res.arrayBuffer()
   },
+  openBuildFolder: () => call<{ path: string }>('POST', '/api/export/open-folder'),
   exportFonts: (choice: { staticFormats: string[]; weights: string[] | null; variableFormats: string[] }) =>
     call<{ paths: string[]; bytes: number; variableNote: string | null }>('POST', '/api/export', choice),
   addWeight: (name: string, copyFrom: string, location: Record<string, number>) =>

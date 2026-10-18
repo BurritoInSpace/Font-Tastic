@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, readBase64, type ChangeEvent, type CompatReport, type EditorsInfo, type ImportReport, type Project } from './api'
+import { api, readBase64, type ChangeEvent, type CompatReport, type EditorsInfo, type ImportReport, type PointFocus, type Project } from './api'
 import { logo, tabIcons } from './assets'
 import { describeLocation } from './axes'
 import { GlyphEditor } from './components/GlyphEditor'
@@ -41,6 +41,7 @@ export default function App() {
   const [accenting, setAccenting] = useState(false)
   const [bulk, setBulk] = useState<BulkAction | null>(null)
   const [compare, setCompare] = useState('')
+  const [focus, setFocus] = useState<(PointFocus & { glyph: string }) | null>(null)
   const [editors, setEditors] = useState<EditorsInfo | null>(null)
   const revision = useRef<number | null>(null)
   revision.current = project?.revision ?? null
@@ -88,6 +89,14 @@ export default function App() {
     const t = window.setTimeout(() => api.compat().then(setCompat).catch(() => {}), 400)
     return () => window.clearTimeout(t)
   }, [multiWeight, projectRevision])
+
+  // A flashed problem is shown once: forget it when the flash is over, so it
+  // doesn't replay whenever the glyph editor is shown again.
+  useEffect(() => {
+    if (!focus) return
+    const t = window.setTimeout(() => setFocus(null), 2600)
+    return () => window.clearTimeout(t)
+  }, [focus])
 
   // App-wide shortcuts: Ctrl+S flips to the master edited before, Ctrl+I imports SVGs.
   useEffect(() => {
@@ -224,6 +233,7 @@ export default function App() {
 
   const exported = (res: { paths: string[]; bytes: number; variableNote: string | null }) => {
     setExporting(false)
+    void refresh() // picks up the export choices the dialog saved, so it opens with them next time
     const names = res.paths.map((p) => p.split(/[\\/]/).pop())
     setMessage({
       text: (names.length ? `Exported ${names.join(', ')} to build/ (${Math.round(res.bytes / 1024)} KB)` : 'Nothing exported') +
@@ -308,7 +318,8 @@ export default function App() {
               <GlyphEditor project={project} glyph={glyph} onChanged={refresh} onError={onError}
                 onMessage={(text) => setMessage({ text })} onOpenGlyph={setSelected} onProject={setProject}
                 showPoints={showPoints} onShowPoints={setShowPoints} compat={compat}
-                compare={compare} onCompare={setCompare} editorLabel={editors?.label} />
+                compare={compare} onCompare={setCompare} editorLabel={editors?.label}
+                focus={focus && focus.glyph === glyph.name ? focus : null} />
             ) : (
               <div className="empty">Pick a glyph on the left to place its anchors.</div>
             ))}
@@ -320,7 +331,12 @@ export default function App() {
           )}
           {tab === 'variable' && (
             <VariablePanel project={project} compat={compat} onError={onError}
-              onOpenGlyph={(n, points) => { setSelected(n); setTab('glyph'); if (points) setShowPoints(true) }}
+              onOpenGlyph={(n, points, where) => {
+                setSelected(n)
+                setTab('glyph')
+                if (points || where) setShowPoints(true)
+                setFocus(where ? { glyph: n, ...where, key: Date.now() } : null)
+              }}
               onNewWeight={() => setNewWeight(true)} onProject={setProject} onCompat={setCompat}
               onMessage={(text) => setMessage({ text })} />
           )}

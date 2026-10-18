@@ -177,3 +177,23 @@ def test_reversed_contour_is_fixable_not_a_redraw(project):
     assert [p["severity"] for p in problems if p["severity"] != "warning"] == ["fixable"]
     assert project.match_all_to_default() == {"fixed": ["uni05D2"], "errors": {}}
     assert project.compatibility()["glyphs"].get("uni05D2", []) == []
+
+
+def test_problem_says_where_in_the_points_view(project):
+    # the right side (points 2 -> 3, counted from the start at bottom-left) is curved in Bold
+    regular = '<path d="M100,800 L400,800 L400,100 L100,100 Z"/>'
+    bold = '<path d="M100,800 L400,800 C450,600 450,300 400,100 L100,100 Z"/>'
+    (p,) = [p for p in two_weights(project, regular, bold) if p["type"] == "node_incompatibility"]
+    assert (p["contour"], p["points"]) == (0, [2, 3])
+    assert p["message"] == "Contour 1, between points 2 and 3: straight in Regular but curved in Bold"
+    gimel = next(g for g in project.summary()["glyphs"] if g["name"] == "uni05D2")
+    assert gimel["unicodeName"] == "hebrew letter gimel"
+
+
+def test_open_build_folder(project, monkeypatch):
+    from fonttastic import illustrator
+
+    opened = []
+    monkeypatch.setattr(illustrator, "open_folder", opened.append)
+    r = TestClient(create_app(project, watch=False)).post("/api/export/open-folder")
+    assert r.status_code == 200 and opened == [project.build_dir] and project.build_dir.is_dir()

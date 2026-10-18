@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, type AxisRange, type CompatReport, type Project, type VariableSetup } from '../api'
+import { api, type AxisRange, type CompatProblem, type CompatReport, type Glyph, type Project, type VariableSetup } from '../api'
 import { describeLocation, type Location } from '../axes'
 import { ShapingFont } from '../shaping'
 import { CommitInput } from './GlyphEditor'
@@ -7,8 +7,8 @@ import { CommitInput } from './GlyphEditor'
 interface Props {
   project: Project
   compat: CompatReport | null
-  /** points: open it in the numbered points view */
-  onOpenGlyph: (name: string, points?: boolean) => void
+  /** points: open it in the numbered points view; where: a contour or segment to point out there */
+  onOpenGlyph: (name: string, points?: boolean, where?: { contour?: number; points?: [number, number] }) => void
   onNewWeight: () => void
   onError: (msg: string) => void
   onProject: (project: Project) => void
@@ -82,7 +82,7 @@ export function VariablePanel({ project, compat, onOpenGlyph, onNewWeight, onErr
 
       <aside className="side-panel light">
         <h4>Compatibility</h4>
-        <CompatReportView compat={compat} onOpenGlyph={onOpenGlyph} defaultWeight={setup.default}
+        <CompatReportView compat={compat} onOpenGlyph={onOpenGlyph} defaultWeight={setup.default} glyphs={project.glyphs}
           onFixAll={async () => {
             try {
               const res = await api.fixAll()
@@ -394,9 +394,17 @@ function VariablePreview({ project, setup }: { project: Project; setup: Variable
   )
 }
 
-function CompatReportView({ compat, onOpenGlyph, defaultWeight, onFix, onFixAll }: {
+/** A glyph as people read it: the character and its name, e.g. "ה hebrew letter he". */
+function readable(g: Glyph | undefined): string {
+  if (!g) return ''
+  const name = g.niceName ?? g.unicodeName
+  return [g.char, name].filter(Boolean).join(' ')
+}
+
+function CompatReportView({ compat, onOpenGlyph, defaultWeight, glyphs, onFix, onFixAll }: {
   compat: CompatReport | null
-  onOpenGlyph: (g: string, points?: boolean) => void
+  onOpenGlyph: (g: string, points?: boolean, where?: { contour?: number; points?: [number, number] }) => void
+  glyphs: Glyph[]
   defaultWeight: string
   onFix: (g: string) => void
   onFixAll: () => void
@@ -407,6 +415,15 @@ function CompatReportView({ compat, onOpenGlyph, defaultWeight, onFix, onFixAll 
     return <p className="gap-ok">Every glyph matches across the weights. The variable font is ready to export.</p>
   }
   const bySeverity = (sev: string) => entries.filter(([, ps]) => ps.some((p) => p.severity === sev))
+  const byName = new Map(glyphs.map((g) => [g.name, g]))
+  const problem = (name: string, p: CompatProblem, i: number) => p.contour === undefined
+    ? <div key={i}>{p.message}</div>
+    : (
+      <button key={i} className="problem-link" title="Show it in the glyph"
+        onClick={() => onOpenGlyph(name, true, { contour: p.contour, points: p.points })}>
+        {p.message}
+      </button>
+    )
   return (
     <div className="compat-report">
       <p className="hint">
@@ -431,12 +448,15 @@ function CompatReportView({ compat, onOpenGlyph, defaultWeight, onFix, onFixAll 
               {glyphs.map(([name, ps]) => (
                 <li key={name} className={sev}>
                   <div className="row">
-                    <button className="link grow" onClick={() => onOpenGlyph(name, sev !== 'warning')}>{name}</button>
+                    <button className="link grow glyph-title" onClick={() => onOpenGlyph(name, sev !== 'warning')}>
+                      <span className="readable">{readable(byName.get(name)) || name}</span>
+                      {readable(byName.get(name)) && <span className="muted small"> {name}</span>}
+                    </button>
                     {sev === 'fixable' && (
                       <button className="chip" onClick={() => onFix(name)} title={`Match to ${defaultWeight}`}>Fix</button>
                     )}
                   </div>
-                  {ps.filter((p) => p.severity === sev).map((p, i) => <div key={i}>{p.message}</div>)}
+                  {ps.filter((p) => p.severity === sev).map((p, i) => problem(name, p, i))}
                 </li>
               ))}
             </ul>

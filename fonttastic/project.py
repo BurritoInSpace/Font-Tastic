@@ -1514,6 +1514,7 @@ class Project:
             "char": naming.display_char(glyph.name),
             "niceName": hebrew.LETTER_NAMES.get(glyph.unicodes[0]) if glyph.unicodes else None,
             "script": scripts.script_of(glyph.name),
+            "unicodeName": _unicode_name(glyph.unicodes[0]) if glyph.unicodes else None,
             "category": categories.get(glyph.name, "base"),
             "width": glyph.width,
             "source": glyph.lib.get(SOURCE),
@@ -1551,6 +1552,14 @@ def glyph_preview(project_file: str | Path) -> dict | None:
         if len(glyph):
             return {"name": name, "path": glyph_svg_path(glyph, font), "bounds": _bounds(glyph, font)}
     return None
+
+
+def _unicode_name(cp: int) -> str | None:
+    """e.g. "hebrew letter he", "latin small letter e"."""
+    import unicodedata
+
+    name = unicodedata.name(chr(cp), None)
+    return name.lower() if name else None
 
 
 def glyph_svg_path(glyph, glyph_set=None) -> str:

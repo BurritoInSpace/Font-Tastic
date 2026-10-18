@@ -69,7 +69,8 @@ def _describe(p: dict) -> str:
     if kind == "node_incompatibility":
         shape = {"lineTo": "straight", "curveTo": "curved", "qCurveTo": "curved", "moveTo": "a start"}
         a, b = shape.get(p["value_1"], p["value_1"]), shape.get(p["value_2"], p["value_2"])
-        return f"{c}, segment {p['node'] + 1}: {a} in {m1} but {b} in {m2}"
+        where = f"between points {p['points'][0]} and {p['points'][1]}" if p.get("points") else f"segment {p['node'] + 1}"
+        return f"{c}, {where}: {a} in {m1} but {b} in {m2}"
     if kind == "contour_order":
         return f"The contours are in a different order in {m2} than in {m1}"
     if kind == "wrong_start_point":
@@ -82,6 +83,26 @@ def _describe(p: dict) -> str:
     if kind == "overweight":
         return f"{c} gets heavier than expected between {m1} and {m2}"
     return f"{kind} between {m1} and {m2}"
+
+
+def _locate(p: dict, fonts, glyph: str) -> dict:
+    """Where the problem is, in the terms the points view shows: ``contour``
+    (from 0; interpolatable calls it ``path`` for some problems) and, for a
+    segment, ``points``: the numbers of its two end points, counted from 1
+    at the contour's start. interpolatable's node k is the segment ending at
+    on-curve point k (the last one closes back to point 1)."""
+    contour = p.get("contour", p.get("path"))
+    if isinstance(contour, int):
+        p["contour"] = contour
+    node = p.get("node")
+    if isinstance(contour, int) and isinstance(node, int) and node > 0:
+        font = fonts[p.get("master_1_idx", 0)]
+        contours = resequence.glyph_contours(font[glyph])
+        if contour < len(contours):
+            count = len(resequence.on_curve(contours[contour]))
+            if count:
+                p["points"] = [(node - 1) % count + 1, node % count + 1]
+    return p
 
 
 def _reorderable(fonts, glyph: str) -> bool:
@@ -147,7 +168,7 @@ def check(weights: list[tuple[str, object]]) -> dict:
                               f"The points run in a different order in {', '.join(others)} than in {names[0]} "
                               "(start point or direction): Fix lines them up"})
         for p in found:
-            add(glyph, dict(p))
+            add(glyph, _locate(dict(p), fonts, glyph))
 
     counts = {"errors": 0, "fixable": 0, "warnings": 0}
     for found in report.values():

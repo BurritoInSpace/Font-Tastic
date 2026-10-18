@@ -217,6 +217,17 @@ def reveal_command(path: Path) -> str:
     return f'explorer /select,"{Path(path).resolve()}"'
 
 
+def open_folder(path: Path):
+    """Show a folder in Explorer (Finder, or the file manager elsewhere)."""
+    with _outside_bundle() as env:
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", str(path)], env=env)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+
+
 def reveal_in_file_manager(path: Path):
     if sys.platform == "win32":
         # Explorer wants /select,"C:\path" with the quotes around the path only; passed

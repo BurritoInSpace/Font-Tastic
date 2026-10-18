@@ -1,4 +1,4 @@
-import type { PointContour, PointOrder } from '../api'
+import type { PointContour, PointFocus, PointOrder } from '../api'
 
 /** One colour per contour, so the same contour is easy to find in both weights. */
 export const CONTOUR_COLOURS = ['#5a76d2', '#e0685c', '#3f9e6e', '#c9912a', '#a45ac9', '#2f9fb5']
@@ -14,14 +14,62 @@ function heading(c: PointContour): { x: number; y: number } | null {
   return null
 }
 
+/**
+ * SVG path data along a contour's points, from on-curve point ``from`` to
+ * ``to`` (indices into its on-curve points; the whole closed contour when
+ * both are left out). Off-curve points between two on-curve ones are handles.
+ */
+function pathAlong(c: PointContour, from?: number, to?: number): string {
+  const pts = c.points
+  const on = pts.map((p, i) => (p[2] !== null ? i : -1)).filter((i) => i >= 0)
+  if (!on.length) return ''
+  const whole = from === undefined
+  const startIdx = on[whole ? 0 : from!]
+  const endIdx = whole ? startIdx : on[to!]
+  let d = `M${pts[startIdx][0]},${pts[startIdx][1]}`
+  let offs: number[][] = []
+  for (let k = 1; k <= pts.length; k++) {
+    const i = (startIdx + k) % pts.length
+    const [x, y, kind] = pts[i]
+    if (kind === null) {
+      offs.push([x, y])
+      continue
+    }
+    if (offs.length >= 2) d += ` C${offs[0]} ${offs[offs.length - 1]} ${x},${y}`
+    else if (offs.length === 1) d += ` Q${offs[0]} ${x},${y}`
+    else d += ` L${x},${y}`
+    offs = []
+    if (i === endIdx) break
+  }
+  return whole ? d + ' Z' : d
+}
+
+/** A brief yellow flash over a contour, or one segment of it, that a problem points at. */
+function Flash({ contours, focus, scale }: { contours: PointContour[]; focus: PointFocus; scale: number }) {
+  if (focus.contour === undefined || !contours[focus.contour]) return null
+  const c = contours[focus.contour]
+  const on = c.points.filter((p) => p[2] !== null)
+  const seg = focus.points && focus.points[0] <= on.length && focus.points[1] <= on.length
+    ? [focus.points[0] - 1, focus.points[1] - 1] as const : null
+  return (
+    <g className="flash">
+      <path className="flash-line" d={seg ? pathAlong(c, seg[0], seg[1]) : pathAlong(c)} />
+      {seg && seg.map((i) => <circle key={i} className="flash-ring" cx={on[i][0]} cy={on[i][1]} r={28 * scale} />)}
+    </g>
+  )
+}
+
 /** Markers, in the canvas's flipped (y-up) group. Clicking an on-curve point makes it the start point. */
-export function PointMarks({ contours, scale = 1, onPick }: {
+export function PointMarks({ contours, scale = 1, onPick, focus }: {
   contours: PointContour[]
   scale?: number
   onPick?: (contour: number, point: number) => void
+  /** briefly highlight a contour or segment */
+  focus?: PointFocus | null
 }) {
   return (
     <g className="point-marks">
+      {focus && <Flash key={focus.key} contours={contours} focus={focus} scale={scale} />}
       {contours.map((c, ci) => {
         const dir = heading(c)
         const [sx, sy] = c.points[0] ?? [0, 0]

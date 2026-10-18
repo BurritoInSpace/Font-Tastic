@@ -597,6 +597,14 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
             raise HTTPException(422, preview_cache["error"])
         return Response(preview_cache["data"], media_type="font/otf", headers={"Cache-Control": "no-store"})
 
+    @app.post("/api/export/open-folder")
+    def open_build_folder():
+        """Show the folder exports go into."""
+        project = state.require()
+        project.build_dir.mkdir(exist_ok=True)
+        illustrator.open_folder(project.build_dir)
+        return {"path": str(project.build_dir)}
+
     @app.post("/api/export")
     def export(req: ExportRequest | None = None):
         """The chosen static formats for the chosen weights, and the variable

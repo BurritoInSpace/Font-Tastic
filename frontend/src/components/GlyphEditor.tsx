@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, readBase64, type Anchor, type CompatReport, type Glyph, type PointOrder, type Project } from '../api'
+import { api, readBase64, type Anchor, type CompatReport, type Glyph, type PointFocus, type PointOrder, type Project } from '../api'
 import { basesFor, charsToGlyphs, glyphLabel, marksFor, standardAnchors } from '../glyphs'
 import { ALTERNATE_FEATURES, nextAlternateName } from '../importPlan'
 import { useConfirm } from './Confirm'
@@ -25,13 +25,15 @@ interface Props {
   onCompare?: (text: string) => void
   /** the drawing app "Edit in" opens: Illustrator, Inkscape or default app */
   editorLabel?: string
+  /** a contour or segment to flash in the points view (from a compatibility problem) */
+  focus?: PointFocus | null
 }
 
 const PAD = 160
 
 export function GlyphEditor({
   project, glyph, onChanged, onError, onMessage, onOpenGlyph, onProject, showPoints = false, onShowPoints, compat,
-  compare = '', onCompare, editorLabel = 'Illustrator',
+  compare = '', onCompare, editorLabel = 'Illustrator', focus,
 }: Props) {
   const editIn = editorLabel === 'default app' ? 'Open in default app' : `Edit in ${editorLabel}`
   const [reassigning, setReassigning] = useState(false)
@@ -446,7 +448,7 @@ export function GlyphEditor({
               onPointerDown={attach ? onPointerDown(attach.index, 'mark') : undefined} />
             {showPoints && points && (
               <g transform={`translate(${viewOffset.x},${viewOffset.y})`}>
-                <PointMarks contours={points.contours} onPick={(c, p) => void editPoints('start', c, p)} />
+                <PointMarks contours={points.contours} onPick={(c, p) => void editPoints('start', c, p)} focus={focus} />
               </g>
             )}
             {anchors.map((a, i) => (

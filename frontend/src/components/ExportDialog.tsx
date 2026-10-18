@@ -8,6 +8,8 @@ interface ExportChoice {
   /** null: every weight */
   weights: string[] | null
   variableFormats: Format[]
+  /** show the build folder once the files are written */
+  openFolder?: boolean
 }
 
 interface Props {
@@ -50,6 +52,7 @@ export function ExportDialog({ project, compat, onCancel, onDone, onError }: Pro
     try {
       await api.saveSettings({ export: choice }).catch(() => {})
       const res = await api.exportFonts(request)
+      if (choice.openFolder && res.paths.length) await api.openBuildFolder().catch(() => {})
       onDone(res)
     } catch (e) {
       onError(String(e))
@@ -109,6 +112,11 @@ export function ExportDialog({ project, compat, onCancel, onDone, onError }: Pro
           </section>
         </div>
         <footer>
+          <label className="check small" title="Show the build/ folder in Explorer when the files are written">
+            <input type="checkbox" checked={!!choice.openFolder}
+              onChange={(e) => setChoice({ ...choice, openFolder: e.target.checked })} />
+            Open the folder when done
+          </label>
           <span className="muted small">{nothing ? 'Pick at least one thing to export' : `${count} file${count === 1 ? '' : 's'}`}</span>
           <span className="spacer" />
           <button className="secondary" onClick={onCancel} disabled={busy}>Cancel</button>
