@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, type EditorsInfo, type FontInfo, type Guide, type Project, type Snapshot } from '../api'
+import { api, nativeBridge, type EditorsInfo, type FontInfo, type Guide, type Project, type Snapshot } from '../api'
 import { describeLocation } from '../axes'
 import { useConfirm } from './Confirm'
 import { CommitInput } from './GlyphEditor'
@@ -97,16 +97,25 @@ export function InfoPanel({ project, onChanged, onRestored, onError, onDeleteWei
             <select value={editors.choice} aria-label="Drawing app"
               onChange={async (e) => {
                 try {
+                  if (e.target.value === 'pick') {
+                    // any program: its path from a file picker (or typed, in a browser tab)
+                    const bridge = nativeBridge()
+                    const path = bridge ? await bridge.pick_app() : window.prompt('Path to the program (its .exe)')
+                    if (path) onEditors?.(await api.setEditor('custom', path))
+                    return
+                  }
                   onEditors?.(await api.setEditor(e.target.value))
                 } catch (err) {
                   onError(String(err))
                 }
               }}>
-              <option value="auto">Automatic ({editors.installed[editors.active] ?? editors.label})</option>
+              <option value="auto">Automatic ({editors.installed[editors.auto] ?? editors.auto})</option>
               {Object.entries(editors.installed).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+              <option value="pick">{editors.customPath ? 'Choose another app on this computer…' : 'Choose an app on this computer…'}</option>
             </select>
             <span className="muted small">
               What Edit opens glyph SVGs in (Ctrl+E). A setting for this computer, not the project.
+              {editors.choice === 'custom' && editors.customPath && <> Using <code>{editors.customPath}</code>.</>}
             </span>
           </div>
         </>

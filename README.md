@@ -7,8 +7,8 @@
 
 # Font-tastic
 
-A Hebrew-first font editor. **Illustrator or Inkscape draws the glyph
-outlines; Font-tastic owns everything typographic**: metrics, niqqud anchors,
+A Hebrew-first font editor. **Illustrator, Inkscape or VectorCraft draws
+the glyph outlines; Font-tastic owns everything typographic**: metrics, niqqud anchors,
 kerning, ligatures, compilation, and a live RTL preview shaped by HarfBuzz.
 
 It isn't a Bezier editor and it isn't an Illustrator plugin. See
@@ -335,11 +335,15 @@ toolbar shows the watcher is running.
   marked with a red **?** in the glyph list.
 - **Show file** reveals the glyph's SVG in Explorer.
 - **Which app:** the Project tab's **Drawing app** setting (for this
-  computer, not the project): Automatic uses Illustrator if it's installed,
-  else Inkscape, else the default app for `.svg`. Adobe isn't needed:
-  Inkscape (free) works the same way.
-- To use a specific install, set `FONTTASTIC_ILLUSTRATOR` to `Illustrator.exe`
-  or `FONTTASTIC_INKSCAPE` to `inkscape.exe`.
+  computer, not the project): Illustrator, Inkscape, VectorCraft (the ones
+  installed), the default app for `.svg`, or **Choose an app on this
+  computer…** for any other program (pick its `.exe`; it's started with the
+  glyph's SVG). Automatic uses Illustrator if it's installed, else Inkscape,
+  else VectorCraft, else the default app. Adobe isn't needed: Inkscape and
+  VectorCraft are free.
+- To use a specific install, set `FONTTASTIC_ILLUSTRATOR` to `Illustrator.exe`,
+  `FONTTASTIC_INKSCAPE` to `inkscape.exe` or `FONTTASTIC_VECTORCRAFT` to
+  `vectorcraft.exe`.
 - When Illustrator asks for SVG options on save, keep **Preserve Illustrator
   Editing Capabilities** on.
 - In Inkscape, the page is the glyph cell (*Document Properties* sets its

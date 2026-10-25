@@ -33,13 +33,17 @@ export interface Glyph {
 
 /** The drawing apps: which are installed, the user's choice, and the one that will open. */
 export interface EditorsInfo {
-  /** auto, illustrator, inkscape or default */
+  /** auto, illustrator, inkscape, vectorcraft, custom or default */
   choice: string
   /** id -> name, e.g. { illustrator: "Adobe Illustrator 2026", inkscape: "Inkscape", default: "..." } */
   installed: Record<string, string>
   active: string
-  /** short name for buttons: Illustrator, Inkscape or default app */
+  /** short name for buttons: Illustrator, Inkscape, VectorCraft, the chosen app's name, or default app */
   label: string
+  /** what Automatic would pick right now */
+  auto: string
+  /** the program chosen with "Choose an app on this computer…" */
+  customPath: string | null
 }
 
 /** An accented letter the font could build from letters and marks it has. */
@@ -361,7 +365,8 @@ export const api = {
     call<{ changed: string[]; project: Project }>('POST', '/api/bulk/anchors', req),
   version: () => call<{ version: string }>('GET', '/api/version'),
   editors: () => call<EditorsInfo>('GET', '/api/editors'),
-  setEditor: (choice: string) => call<EditorsInfo>('PUT', '/api/editors', { choice }),
+  /** choice "custom" with a path: use that program to draw */
+  setEditor: (choice: string, path?: string) => call<EditorsInfo>('PUT', '/api/editors', { choice, path }),
   revealGlyph: (glyph: string) => call<{ path: string }>('POST', `/api/glyphs/${encodeURIComponent(glyph)}/reveal`),
   setAnchors: (glyph: string, anchors: Anchor[]) =>
     call<Glyph>('PUT', `/api/glyphs/${encodeURIComponent(glyph)}/anchors`, { anchors }),
@@ -428,6 +433,8 @@ export function readBase64(file: File): Promise<string> {
 interface Bridge {
   pick_folder(): Promise<string | null>
   pick_project_file(): Promise<string | null>
+  /** a program's .exe, for the custom drawing app */
+  pick_app(): Promise<string | null>
 }
 
 export function nativeBridge(): Bridge | null {

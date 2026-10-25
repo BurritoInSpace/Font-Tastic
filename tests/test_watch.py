@@ -170,3 +170,47 @@ def test_editor_choice_falls_back_to_what_is_installed(monkeypatch):
     assert illustrator.resolve() == "default"
     with pytest.raises(ValueError):
         illustrator.set_editor("photoshop")
+
+
+def test_find_vectorcraft(tmp_path, monkeypatch):
+    monkeypatch.delenv("FONTTASTIC_VECTORCRAFT", raising=False)
+    exe = tmp_path / "VectorCraft" / "vectorcraft.exe"
+    exe.parent.mkdir()
+    exe.write_bytes(b"")
+    assert illustrator.find_vectorcraft([tmp_path / "VectorCraft"]) == exe
+    if sys.platform == "win32":
+        assert illustrator.find_vectorcraft([tmp_path / "nothing"]) is None
+
+
+def test_custom_drawing_app(tmp_path, monkeypatch):
+    exe = tmp_path / "My Drawing App" / "Draw.exe"
+    exe.parent.mkdir()
+    exe.write_bytes(b"")
+    with pytest.raises(ValueError, match="Choose the program first"):
+        illustrator.set_editor("custom")
+    illustrator.set_custom_editor(str(exe))
+    assert illustrator.preferences()["custom_editor"] == str(exe)
+    assert illustrator.resolve() == "custom" and illustrator.installed()["custom"] == "Draw"
+
+    launched = []
+    monkeypatch.setattr(illustrator.subprocess, "Popen", lambda cmd, **kw: launched.append(cmd))
+    svg = tmp_path / "uni05D0.svg"
+    assert illustrator.open_svg(svg) == "Draw"
+    assert launched == [[str(exe), str(svg)]]
+
+    not_a_program = tmp_path / "notes.txt"
+    not_a_program.write_text("x")
+    if sys.platform == "win32":
+        with pytest.raises(ValueError, match="isn't a program"):
+            illustrator.set_custom_editor(str(not_a_program))
+    exe.unlink()  # uninstalled: falls back to what is installed
+    assert illustrator.resolve() != "custom"
+
+
+def test_editors_endpoint_sets_a_custom_app(project, tmp_path):
+    exe = tmp_path / "Draw.exe"
+    exe.write_bytes(b"")
+    client = TestClient(create_app(project, watch=False))
+    r = client.put("/api/editors", json={"choice": "custom", "path": str(exe)}).json()
+    assert (r["choice"], r["active"], r["label"], r["customPath"]) == ("custom", "custom", "Draw", str(exe))
+    assert client.put("/api/editors", json={"choice": "custom", "path": str(tmp_path / "missing.exe")}).status_code == 400

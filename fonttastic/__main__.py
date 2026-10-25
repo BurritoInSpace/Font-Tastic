@@ -36,6 +36,15 @@ class Bridge:
         result = webview.windows[0].create_file_dialog(webview.FileDialog.FOLDER)
         return result[0] if result else None
 
+    def pick_app(self):
+        """A program to draw the glyphs with (Project tab › Drawing app)."""
+        import webview
+
+        result = webview.windows[0].create_file_dialog(
+            webview.FileDialog.OPEN, file_types=("Programs (*.exe)", "All files (*.*)")
+        )
+        return result[0] if result else None
+
     def pick_project_file(self):
         import webview
 

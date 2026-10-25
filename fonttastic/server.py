@@ -124,7 +124,8 @@ class BulkAnchorsRequest(BaseModel):
 
 
 class EditorRequest(BaseModel):
-    choice: str  # auto, illustrator, inkscape or default
+    choice: str  # auto, illustrator, inkscape, vectorcraft, custom or default
+    path: str | None = None  # with "custom": the program to use
 
 
 class MetricsRequest(BaseModel):
@@ -421,8 +422,11 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
         chosen = illustrator.preferences().get("editor", "auto")
         active = illustrator.resolve()
         have = illustrator.installed()
-        return {"choice": chosen, "installed": have, "active": active,
-                "label": "Illustrator" if active == "illustrator" else "Inkscape" if active == "inkscape" else "default app"}
+        labels = {"illustrator": "Illustrator", "inkscape": "Inkscape", "vectorcraft": "VectorCraft",
+                  "custom": have.get("custom", "your app"), "default": "default app"}
+        custom = illustrator.custom_editor()
+        return {"choice": chosen, "installed": have, "active": active, "label": labels[active],
+                "auto": illustrator.resolve("auto"), "customPath": str(custom) if custom else None}
 
     @app.get("/api/editors")
     def get_editors():
@@ -432,7 +436,10 @@ def create_app(project: Project | None = None, watch: bool = True) -> FastAPI:
     @app.put("/api/editors")
     def put_editors(req: EditorRequest):
         try:
-            illustrator.set_editor(req.choice)
+            if req.choice == "custom" and req.path:
+                illustrator.set_custom_editor(req.path)
+            else:
+                illustrator.set_editor(req.choice)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         return editors_info()

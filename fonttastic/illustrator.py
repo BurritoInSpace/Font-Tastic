@@ -4,8 +4,10 @@ the glyph watcher re-imports it, the same round trip Photoshop uses for linked
 Smart Objects.
 
 Which app is a per-user preference (``editor`` in preferences.json):
-``illustrator``, ``inkscape``, ``default`` (whatever the OS opens .svg with),
-or ``auto``: Illustrator if installed, else Inkscape, else the default app.
+``illustrator``, ``inkscape``, ``vectorcraft``, ``custom`` (any program the
+user picked, kept as ``custom_editor``), ``default`` (whatever the OS opens
+.svg with), or ``auto``: Illustrator if installed, else Inkscape, else
+VectorCraft, else the default app.
 
 The Illustrator used is the ``FONTTASTIC_ILLUSTRATOR`` environment variable
 (path to Illustrator.exe), else the newest release found under Program Files
@@ -119,7 +121,50 @@ def _launch(app: Illustrator | None, svg: Path, env) -> str:
 
 # -- Inkscape and the choice of app -------------------------------------------------
 
-EDITORS = {"illustrator": "Adobe Illustrator", "inkscape": "Inkscape", "default": "the default app for .svg"}
+EDITORS = {"illustrator": "Adobe Illustrator", "inkscape": "Inkscape", "vectorcraft": "VectorCraft",
+           "custom": "an app you chose", "default": "the default app for .svg"}
+AUTO_ORDER = ("illustrator", "inkscape", "vectorcraft", "default")
+
+
+def find_vectorcraft(search_dirs: list[Path] | None = None) -> Path | str | None:
+    """VectorCraft's executable (a path, or on macOS the app name), or None."""
+    if override := os.environ.get("FONTTASTIC_VECTORCRAFT"):
+        path = Path(override)
+        return path if path.is_file() else None
+    if sys.platform == "darwin" and search_dirs is None:
+        return "VectorCraft" if Path("/Applications/VectorCraft.app").exists() else None
+    if search_dirs is None:
+        roots = [os.environ.get(v) for v in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)")]
+        local = os.environ.get("LOCALAPPDATA")
+        search_dirs = [Path(r) / "VectorCraft" for r in roots if r] + (
+            [Path(local) / "Programs" / "VectorCraft"] if local else [])
+    for base in search_dirs:
+        exe = base / "vectorcraft.exe"
+        if exe.is_file():
+            return exe
+    found = shutil.which("vectorcraft") if sys.platform != "win32" else None
+    return Path(found) if found else None
+
+
+def custom_editor() -> Path | None:
+    """The program the user picked as their drawing app, if it's still there."""
+    path = preferences().get("custom_editor")
+    return Path(path) if path and Path(path).is_file() else None
+
+
+def set_custom_editor(path: str):
+    """Use any program to draw the glyphs: it's started with the SVG's path."""
+    exe = Path(path)
+    if not exe.is_file():
+        raise ValueError(f"{path} isn't a file")
+    if sys.platform == "win32" and exe.suffix.lower() not in (".exe", ".com", ".bat", ".cmd"):
+        raise ValueError(f"{exe.name} isn't a program (pick its .exe)")
+    _save_preferences(custom_editor=str(exe), editor="custom")
+
+
+def custom_name(exe: Path) -> str:
+    """A readable name for the picked program: its file name without .exe."""
+    return exe.stem
 
 
 def find_inkscape(search_dirs: list[Path] | None = None) -> Path | str | None:
@@ -155,13 +200,19 @@ def preferences() -> dict:
         return {}
 
 
-def set_editor(choice: str):
-    if choice != "auto" and choice not in EDITORS:
-        raise ValueError(f"Unknown drawing app {choice!r}")
-    prefs = {**preferences(), "editor": choice}
+def _save_preferences(**values):
+    prefs = {**preferences(), **values}
     path = _preferences_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(prefs, indent=2), encoding="utf-8")
+
+
+def set_editor(choice: str):
+    if choice != "auto" and choice not in EDITORS:
+        raise ValueError(f"Unknown drawing app {choice!r}")
+    if choice == "custom" and custom_editor() is None:
+        raise ValueError("Choose the program first")
+    _save_preferences(editor=choice)
 
 
 def installed() -> dict[str, str]:
@@ -171,18 +222,22 @@ def installed() -> dict[str, str]:
         out["illustrator"] = app.name
     if find_inkscape() is not None:
         out["inkscape"] = "Inkscape"
+    if find_vectorcraft() is not None:
+        out["vectorcraft"] = "VectorCraft"
+    if (exe := custom_editor()) is not None:
+        out["custom"] = custom_name(exe)
     out["default"] = EDITORS["default"]
     return out
 
 
 def resolve(choice: str | None = None) -> str:
     """The app to use: the preference (or ``choice``), falling back through
-    Illustrator, Inkscape and the default app when it isn't installed."""
+    Illustrator, Inkscape, VectorCraft and the default app when it isn't installed."""
     choice = choice or preferences().get("editor", "auto")
     have = installed()
     if choice in have:
         return choice
-    return next(e for e in ("illustrator", "inkscape", "default") if e in have)
+    return next(e for e in AUTO_ORDER if e in have)
 
 
 def open_svg(svg: Path) -> str:
@@ -192,12 +247,32 @@ def open_svg(svg: Path) -> str:
         return open_in_illustrator(svg)
     if editor == "inkscape":
         return open_in_inkscape(svg)
+    if editor == "vectorcraft":
+        exe = find_vectorcraft()
+        if exe is None:
+            raise OSError("VectorCraft isn't installed (or set FONTTASTIC_VECTORCRAFT to vectorcraft.exe)")
+        return _launch_with(exe, svg, "VectorCraft")
+    if editor == "custom":
+        exe = custom_editor()
+        if exe is None:
+            raise OSError("The app you chose isn't there any more; choose it again in the Project tab")
+        return _launch_with(exe, svg, custom_name(exe))
     with _outside_bundle():
         if sys.platform == "win32":
             os.startfile(svg)  # noqa: S606 — the user's own file, in their default app
         else:
             subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(svg)])
     return EDITORS["default"]
+
+
+def _launch_with(exe: Path | str, svg: Path, name: str) -> str:
+    """Start a drawing app on ``svg`` (on macOS, ``exe`` may be an app name)."""
+    with _outside_bundle() as env:
+        if isinstance(exe, str):
+            subprocess.Popen(["open", "-a", exe, str(svg)])
+        else:
+            subprocess.Popen([str(exe), str(svg)], close_fds=True, env=env, cwd=Path.home())
+    return name
 
 
 def open_in_inkscape(svg: Path) -> str:
